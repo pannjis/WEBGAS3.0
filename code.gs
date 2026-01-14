@@ -886,9 +886,30 @@ function tambahKategori(nama) {
   SpreadsheetApp.getActiveSpreadsheet().getSheetByName('KATEGORI').appendRow([nama]);
 }
 
+// Di file code.gs
+
 function simpanKeuangan(form) {
-  SpreadsheetApp.getActiveSpreadsheet().getSheetByName('KEUANGAN')
-    .appendRow(['MANUAL-' + Date.now(), new Date(), form.jenis, form.kategori, form.nominal, form.keterangan]);
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('KEUANGAN');
+  
+  // PENGAMAN: Jika header terhapus, buat lagi biar data tidak error
+  if (sheet.getLastRow() === 0) {
+     sheet.appendRow(['ID', 'Tanggal', 'Jenis', 'Kategori', 'Nominal', 'Keterangan']);
+  }
+
+  // Simpan Data Baru
+  sheet.appendRow([
+      'MANUAL-' + Date.now(), 
+      new Date(), 
+      form.jenis, 
+      form.kategori, 
+      form.nominal, 
+      form.keterangan
+  ]);
+  
+  // [SOLUSI UTAMA] Paksa simpan perubahan agar saat di-load data sudah ada
+  SpreadsheetApp.flush(); 
+  
+  return "Sukses";
 }
 
 // --- SDM: KARYAWAN ---
