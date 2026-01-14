@@ -293,6 +293,63 @@ function tambahProduk(form) {
   ]);
 }
 
+// [BARU] Fungsi Update Produk (Edit Mode)
+function updateProduk(form) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('PRODUK');
+  const data = sheet.getDataRange().getValues();
+  
+  // ID Folder Google Drive (Sama seperti tambah produk)
+  const FOLDER_ID = '15hiLtvusofF2OJpXVq8lJkePbmqVIuPM'; 
+
+  let rowTarget = -1;
+  let oldImage = '';
+
+  // 1. Cari Baris Produk Berdasarkan ID (Kolom A / Index 0)
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] == form.id) {
+      rowTarget = i + 1;
+      oldImage = data[i][8]; // Simpan gambar lama
+      break;
+    }
+  }
+
+  if (rowTarget === -1) throw new Error("Produk tidak ditemukan/ID salah.");
+
+  // 2. Cek Apakah Ada Gambar Baru Diupload?
+  let finalImageUrl = oldImage;
+
+  if (form.gambar && form.gambar.data) {
+    try {
+      const decoded = Utilities.base64Decode(form.gambar.data);
+      const blob = Utilities.newBlob(decoded, form.gambar.mimeType, 'UPD-' + form.gambar.fileName);
+      const folder = DriveApp.getFolderById(FOLDER_ID);
+      const file = folder.createFile(blob);
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      finalImageUrl = "https://drive.google.com/thumbnail?id=" + file.getId() + "&sz=w1000";
+    } catch (e) {
+      // Jika gagal upload, tetap lanjut simpan data teks, gambar pakai yang lama
+      console.log("Gagal update gambar: " + e.message);
+    }
+  } else if (typeof form.gambar === 'string' && form.gambar !== '') {
+      // Jika user memasukkan link manual baru
+      finalImageUrl = form.gambar;
+  }
+
+  // 3. Update Baris (KECUALI STOK ISI & KOSONG)
+  // Urutan Kolom: [0]ID, [1]Nama, [2]Jual, [3]Beli, [4]Isi(SKIP), [5]Kosong(SKIP), [6]SKU, [7]Kode, [8]Gambar
+  
+  sheet.getRange(rowTarget, 2).setValue(form.nama);       // Update Nama
+  sheet.getRange(rowTarget, 3).setValue(form.hargaJual);  // Update Harga Jual
+  sheet.getRange(rowTarget, 4).setValue(form.hargaBeli);  // Update Harga Beli
+  // Kolom 5 & 6 (Stok) TIDAK DISENTUH
+  sheet.getRange(rowTarget, 7).setValue(form.sku);        // Update SKU
+  sheet.getRange(rowTarget, 8).setValue(form.kode);       // Update Kode Barcode
+  sheet.getRange(rowTarget, 9).setValue(finalImageUrl);   // Update Gambar
+
+  return "Produk Berhasil Diupdate!";
+}
+
 function hapusProduk(nama) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('PRODUK');
   const data = sheet.getDataRange().getValues();
