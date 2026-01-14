@@ -710,7 +710,7 @@
                   <th>Kategori</th>
                   <th>Nominal</th>
                   <th>Ket</th>
-                </tr>
+                  <th class="text-center">Aksi</th> </tr>
               </thead>
               <tbody></tbody>
             </table>
@@ -1035,25 +1035,44 @@
     </div>
   </div>
 
-  <div class="modal fade" id="modalKeuangan" tabindex="-1">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5>Catat Keuangan</h5><button class="btn-close" data-bs-dismiss="modal"></button>
+    <div class="modal fade" id="modalKeuangan" tabindex="-1">
+        <div class="modal-dialog">
+          <div class="modal-content">
+            
+            <div class="modal-header">
+              <h5 class="fw-bold" id="modalKeuanganTitle">Catat Keuangan</h5>
+              <button class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            
+            <div class="modal-body">
+              <label class="small fw-bold text-muted mb-1">Tanggal Transaksi</label>
+              <input type="date" id="keu-tanggal" class="form-control mb-2 fw-bold">
+
+              <label class="small fw-bold text-muted mb-1">Jenis & Kategori</label>
+              <select id="keu-jenis" class="form-select mb-2">
+                <option>Pengeluaran</option>
+                <option>Pemasukan</option>
+              </select>
+              
+              <div class="input-group mb-2">
+                <select id="keu-kategori" class="form-select"></select>
+                <button class="btn btn-outline-secondary" onclick="tambahKategoriBaru()">+</button>
+              </div>
+              
+              <label class="small fw-bold text-muted mb-1">Nominal (Rp)</label>
+              <input type="text" id="keu-nominal" class="form-control mb-2 fw-bold text-primary fs-5" placeholder="0" onkeyup="formatRupiahInput(this)">
+              
+              <label class="small fw-bold text-muted mb-1">Keterangan</label>
+              <input id="keu-ket" class="form-control" placeholder="Cth: Bayar Listrik Bulan Ini">
+            </div>
+
+            <div class="modal-footer">
+              <button onclick="simpanKeuangan()" id="btn-simpan-keuangan" class="btn btn-primary">Simpan</button>
+            </div>
+
+          </div>
         </div>
-        <div class="modal-body">
-          <select id="keu-jenis" class="form-select mb-2">
-            <option>Pengeluaran</option>
-            <option>Pemasukan</option>
-          </select>
-          <div class="input-group mb-2"><select id="keu-kategori" class="form-select"></select><button class="btn btn-outline-secondary" onclick="tambahKategoriBaru()">+</button></div>
-          <input type="number" id="keu-nominal" class="form-control mb-2" placeholder="Rp">
-          <input id="keu-ket" class="form-control" placeholder="Keterangan">
-        </div>
-        <div class="modal-footer"><button onclick="simpanKeuangan()" class="btn btn-primary">Simpan</button></div>
       </div>
-    </div>
-  </div>
 
   <div class="modal fade" id="modalPelanggan" tabindex="-1">
     <div class="modal-dialog">
