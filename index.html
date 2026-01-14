@@ -701,6 +701,51 @@
             <h3 class="page-title">Arus Kas</h3>
             <button class="btn btn-primary rounded-pill" onclick="bukaModalKeuangan()">+ Catat Kas</button>
           </div>
+
+          <div class="card p-4 border-0 shadow-sm mb-3">
+             <div class="d-flex justify-content-between align-items-center mb-3 pb-3 border-bottom">
+               <div class="d-flex align-items-center gap-2">
+                  <i class="material-icons text-muted">filter_list</i>
+                  <select class="form-select form-select-sm border-secondary fw-bold text-dark" style="width: 200px;" onchange="setFilterCepat(this.value, 'KEUANGAN')">
+                      <option value="">-- Filter Cepat --</option>
+                      <option value="hari_ini">Hari Ini</option>
+                      <option value="kemarin">Kemarin</option>
+                      <option value="7_hari">7 Hari Terakhir</option>
+                      <option value="bulan_ini">Bulan Ini</option>
+                      <option value="bulan_lalu">Bulan Kemarin</option>
+                  </select>
+               </div>
+               <div class="d-flex gap-2">
+                  <button class="btn btn-sm btn-success rounded-pill px-3" onclick="exportKeExcel('tabel-keuangan', 'Laporan_Arus_Kas')">
+                      <i class="material-icons align-middle me-1" style="font-size:16px">table_view</i> Excel
+                  </button>
+                  <button class="btn btn-sm btn-danger rounded-pill px-3" onclick="printLaporanPDF('tabel-keuangan', 'Laporan Arus Kas')">
+                      <i class="material-icons align-middle me-1" style="font-size:16px">picture_as_pdf</i> PDF
+                  </button>
+               </div>
+            </div>
+
+            <div class="row g-2 align-items-end">
+              <div class="col-md-3">
+                <label class="small fw-bold text-muted">Dari Tanggal</label>
+                <input type="date" id="filter-keu-start" class="form-control bg-light border-0">
+              </div>
+              <div class="col-md-3">
+                <label class="small fw-bold text-muted">Sampai Tanggal</label>
+                <input type="date" id="filter-keu-end" class="form-control bg-light border-0">
+              </div>
+              <div class="col-md-4">
+                <label class="small fw-bold text-muted">Cari Kategori / Ket</label>
+                <div class="input-group">
+                  <span class="input-group-text bg-light border-0"><i class="material-icons fs-6">search</i></span>
+                  <input type="text" id="filter-keu-text" class="form-control bg-light border-0" placeholder="Ketik Kategori atau Keterangan...">
+                </div>
+              </div>
+              <div class="col-md-2">
+                <button class="btn btn-dark w-100 fw-bold" onclick="terapkanFilterKeuangan()">FILTER</button>
+              </div>
+            </div>
+          </div>
           <div class="card p-0">
             <table class="table table-custom table-hover m-0" id="tabel-keuangan">
               <thead class="bg-light">
