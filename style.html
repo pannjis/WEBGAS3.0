@@ -17,17 +17,21 @@
     overflow-x: hidden;
   }
 
-  /* --- SIDEBAR --- */
+/* --- SIDEBAR FIX --- */
   .sidebar {
     width: var(--sidebar-width);
     background: #fff;
-    height: 100vh;
+    height: 100vh;      /* Tinggi Full Layar */
     position: fixed;
     top: 0;
     left: 0;
     z-index: 100;
     box-shadow: 2px 0 10px rgba(0,0,0,0.02);
     transition: all 0.3s;
+    
+    /* TAMBAHAN PENTING AGAR MENU TIDAK TENGGELAM */
+    display: flex;
+    flex-direction: column;
   }
 
   .sidebar-header {
