@@ -139,30 +139,66 @@ function getProfilPerusahaan() {
   return config;
 }
 
+// [UPDATE] Fungsi Simpan Profil dengan Fitur Upload Logo
 function simpanProfilPerusahaan(form) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('PENGATURAN');
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('PENGATURAN');
   const data = sheet.getDataRange().getValues();
   
-  // Helper update or insert
-  const updateOrInsert = (key, val) => {
+  // Gunakan ID Folder yang sama dengan Produk (atau ganti jika punya folder khusus logo)
+  const FOLDER_ID = '15hiLtvusofF2OJpXVq8lJkePbmqVIuPM'; 
+
+  // Helper function update/insert
+    const updateOrInsert = (key, val) => {
      let found = false;
+     
+     // [PERBAIKAN] Paksa jadi String dengan menambahkan tanda petik satu (') di depan
+     // Ini trik agar Google Sheet tidak menghapus angka 0 di depan
+     let finalVal = val;
+     if (key === 'no_perusahaan' || key === 'no_pemilik') {
+         finalVal = "'" + val; 
+     }
+
      for(let i=1; i<data.length; i++) {
         if(data[i][0] === key) {
-           sheet.getRange(i+1, 2).setValue(val);
+           sheet.getRange(i+1, 2).setValue(finalVal); // Gunakan finalVal
            found = true;
            break;
         }
      }
-     if(!found) sheet.appendRow([key, val]);
+     if(!found) sheet.appendRow([key, finalVal]); // Gunakan finalVal
   };
 
+  // 1. PROSES UPLOAD LOGO (Jika ada file baru dipilih)
+  if (form.logo && form.logo.data) {
+    try {
+       const decoded = Utilities.base64Decode(form.logo.data);
+       const blob = Utilities.newBlob(decoded, form.logo.mimeType, 'LOGO-' + Date.now());
+       
+       const folder = DriveApp.getFolderById(FOLDER_ID);
+       const file = folder.createFile(blob);
+       
+       // Set Permission agar bisa dilihat publik
+       file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+       
+       const logoUrl = "https://drive.google.com/thumbnail?id=" + file.getId() + "&sz=w1000";
+       
+       // Simpan URL Logo ke Database
+       updateOrInsert('logo_perusahaan', logoUrl);
+
+    } catch (e) {
+       throw new Error("Gagal Upload Logo: " + e.message);
+    }
+  }
+
+  // 2. Simpan Data Teks Lainnya
   updateOrInsert('nama_perusahaan', form.nama_perusahaan);
   updateOrInsert('nama_pemilik', form.nama_pemilik);
   updateOrInsert('alamat', form.alamat);
   updateOrInsert('no_perusahaan', form.no_perusahaan);
   updateOrInsert('no_pemilik', form.no_pemilik);
 
-  return "Profil Perusahaan Disimpan!";
+  return "Profil & Logo Berhasil Disimpan!";
 }
 
 // --- HELPER DATA ---
@@ -478,7 +514,7 @@ function getRiwayatTransaksi() {
       qty: row[4],
       hargaTotal: row[5],
       tipe: row[6],
-      status: row[8]
+      status: row[10]
     });
 
     // Akumulasi Total Bayar (Hanya jika status bukan Retur Full, opsional)
