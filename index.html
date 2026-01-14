@@ -122,7 +122,11 @@
                 <span class="fw-bold d-block text-dark">Akun Saya</span>
                 <small class="text-muted" style="font-size: 11px;">Kelola profil & keamanan</small>
               </li>
-              <li><a class="dropdown-item py-2 mt-1" href="javascript:void(0)" onclick="showPage('pengaturan')"><i class="material-icons align-middle me-2 fs-6 text-muted">settings</i> Pengaturan</a></li>
+              <li>
+                  <button type="button" class="dropdown-item py-2 mt-1" onclick="showPage('pengaturan')">
+                      <i class="material-icons align-middle me-2 fs-6 text-muted">settings</i> Pengaturan
+                  </button>
+              </li>
               <li><hr class="dropdown-divider"></li>
               <li>
                 <button class="dropdown-item py-2 text-danger fw-bold" onclick="logout()">
@@ -671,6 +675,17 @@
                        <div class="col-md-6">
                           <label class="small fw-bold text-muted">No. HP Pemilik</label>
                           <input id="set-comp-no-owner" class="form-control" placeholder="081xxx">
+                       </div>
+                       <div class="col-12 mt-3">
+                          <label class="small fw-bold text-muted">Logo Perusahaan (Opsional)</label>
+                          <div class="d-flex align-items-center gap-3 mt-1 p-2 border rounded bg-light">
+                              <img id="img-preview-logo" src="" class="d-none rounded bg-white border shadow-sm" style="width: 60px; height: 60px; object-fit: contain;">
+                              
+                              <div class="w-100">
+                                <input type="file" id="set-comp-logo" class="form-control form-control-sm" accept="image/*" onchange="previewLogo(this)">
+                                <small class="text-muted fst-italic" style="font-size:10px">*Gunakan file JPG/PNG transparan agar hasil bagus.</small>
+                              </div>
+                          </div>
                        </div>
                        <div class="col-12 text-end mt-3">
                           <button class="btn btn-primary fw-bold rounded-pill px-4" onclick="simpanProfilPerusahaanJS()">SIMPAN PROFIL</button>
