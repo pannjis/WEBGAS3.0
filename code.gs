@@ -901,35 +901,48 @@ function tambahKategori(nama) {
 function simpanKeuangan(form) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('KEUANGAN');
   
+  // Buat header jika sheet masih kosong
   if (sheet.getLastRow() === 0) {
      sheet.appendRow(['ID', 'Tanggal', 'Jenis', 'Kategori', 'Nominal', 'Keterangan']);
   }
 
-  // Parse Tanggal dari Form (YYYY-MM-DD)
-  // Kita pakai new Date(form.tanggal) agar dikenali sheet sebagai objek tanggal
-  const tglInput = new Date(form.tanggal); 
-
-  // --- LOGIKA EDIT ---
+  // Parse tanggal
+  const tglInput = new Date(form.tanggal);
+  
+  // --- LOGIKA EDIT (JIKA ID ADA) ---
   if (form.id && form.id !== 'null' && form.id !== '') {
       const data = sheet.getDataRange().getValues();
       for(let i = 1; i < data.length; i++) {
           if(data[i][0] == form.id) { 
-              // UPDATE KOLOM 2 (TANGGAL) JUGA
-              sheet.getRange(i+1, 2).setValue(tglInput); // Update Tanggal
+              sheet.getRange(i+1, 2).setValue(tglInput);
               sheet.getRange(i+1, 3).setValue(form.jenis);
               sheet.getRange(i+1, 4).setValue(form.kategori);
               sheet.getRange(i+1, 5).setValue(form.nominal);
               sheet.getRange(i+1, 6).setValue(form.keterangan);
-              return "Data Berhasil Diupdate";
+              
+              // [PENTING] INI YANG MEMBUAT ERROR HILANG
+              // Kita harus mengembalikan Object, bukan cuma string "Sukses"
+              return { 
+                  status: 'success', 
+                  msg: 'Data Berhasil Diupdate',
+                  data: { 
+                      id: form.id, 
+                      tanggal: tglInput, 
+                      jenis: form.jenis, 
+                      kategori: form.kategori, 
+                      nominal: form.nominal, 
+                      ket: form.keterangan 
+                  }
+              };
           }
       }
   }
 
-  // --- LOGIKA BARU ---
+  // --- LOGIKA BARU (JIKA ID KOSONG) ---
   const newId = 'MANUAL-' + Date.now();
   sheet.appendRow([
       newId, 
-      tglInput, // Pakai tanggal inputan user, bukan new Date() hari ini
+      tglInput, 
       form.jenis, 
       form.kategori, 
       form.nominal, 
@@ -937,7 +950,20 @@ function simpanKeuangan(form) {
   ]);
   
   SpreadsheetApp.flush(); 
-  return "Sukses";
+  
+  // [PENTING] JANGAN LUPA BAGIAN INI
+  return { 
+      status: 'success', 
+      msg: 'Data Berhasil Disimpan',
+      data: { 
+          id: newId, 
+          tanggal: tglInput, 
+          jenis: form.jenis, 
+          kategori: form.kategori, 
+          nominal: form.nominal, 
+          ket: form.keterangan 
+      }
+  };
 }
 
 // --- BARU: HAPUS KEUANGAN ---
