@@ -1197,7 +1197,7 @@ function eksekusiBayarUtama() {
         loading(true);
         google.script.run.withSuccessHandler(res => {
            loading(false);
-           const idTrxSementara = 'KBA-' + Date.now();
+           const idTrxSementara = 'KBA-' + Date.now(); 
            tampilkanInvoice(payload, idTrxSementara);
            document.getElementById('kasir-pelanggan').value = ""; 
            loadProduk(); 
@@ -2149,20 +2149,127 @@ function loadKeuangan() {
     }).getData('KEUANGAN');
   }
 
-  function bukaModalKeuangan() {
+// Di file javascript.html
+
+function bukaModalKeuangan() {
+    // 1. [SOLUSI] Reset Form agar kosong lagi
+    document.getElementById('keu-nominal').value = ''; 
+    document.getElementById('keu-ket').value = '';
+    
+    // Reset dropdown ke pilihan pertama (Pengeluaran)
+    document.getElementById('keu-jenis').selectedIndex = 0; 
+
+    // 2. Refresh kategori (biar kategori baru muncul)
+    refreshDropdownKategori(); 
+
+    // 3. Tampilkan Modal
     new bootstrap.Modal(document.getElementById('modalKeuangan')).show();
-    google.script.run.withSuccessHandler(c => { const s=document.getElementById('keu-kategori'); s.innerHTML=''; c.forEach(x=>s.innerHTML+=`<option>${x}</option>`); }).getKategori();
-  }
-  function tambahKategoriBaru() { const n = prompt('Nama Kategori?'); if(n) google.script.run.tambahKategori(n); }
-  function simpanKeuangan() {
-    const d = { jenis: document.getElementById('keu-jenis').value, kategori: document.getElementById('keu-kategori').value, nominal: document.getElementById('keu-nominal').value, keterangan: document.getElementById('keu-ket').value };
+    
+    // 4. Auto focus ke kolom nominal biar cepat ngetik
+    setTimeout(() => document.getElementById('keu-nominal').focus(), 500);
+}
+
+// --- 2. FUNGSI SIMPAN KEUANGAN (DIPERBAIKI: Ada Alert & Auto Refresh) ---
+function simpanKeuangan() {
+    // Ambil Data dari Form
+    const jenis = document.getElementById('keu-jenis').value;
+    const kategori = document.getElementById('keu-kategori').value;
+    const nominal = document.getElementById('keu-nominal').value;
+    const ket = document.getElementById('keu-ket').value;
+
+    // Validasi Sederhana
+    if(!nominal || nominal == 0) return myAlert('Eits!', 'Nominal uang wajib diisi ya.', 'warning');
+    if(!kategori || kategori === 'Belum ada kategori') return myAlert('Info', 'Pilih atau buat kategori dulu.', 'warning');
+
+    const dataKirim = { 
+        jenis: jenis, 
+        kategori: kategori, 
+        nominal: nominal, 
+        keterangan: ket 
+    };
+
+    // Tampilkan Loading
     loading(true);
-    google.script.run.withSuccessHandler(()=>{ 
+
+    google.script.run.withSuccessHandler(() => { 
         loading(false);
-        bootstrap.Modal.getInstance(document.getElementById('modalKeuangan')).hide(); 
+        
+        // 1. Tutup Modal
+        const modalEl = document.getElementById('modalKeuangan');
+        const modalInstance = bootstrap.Modal.getInstance(modalEl);
+        if(modalInstance) modalInstance.hide();
+        
+        // 2. Refresh Tabel (Solusi Masalah Data Gak Muncul)
         loadKeuangan(); 
-    }).simpanKeuangan(d);
+
+        // 3. Tampilkan Pesan Sukses (Solusi Masalah Gak Ada Alert)
+        myAlert('Berhasil', 'Data Keuangan berhasil dicatat!', 'success');
+
+    }).simpanKeuangan(dataKirim);
+}
+
+// 2. Fungsi Refresh Dropdown (Dipisahkan agar bisa dipanggil ulang)
+function refreshDropdownKategori() {
+    const selectEl = document.getElementById('keu-kategori');
+    
+    // Tampilkan indikator loading kecil di dalam dropdown (opsional)
+    selectEl.innerHTML = '<option>Loading...</option>';
+
+    google.script.run.withSuccessHandler(categories => {
+        selectEl.innerHTML = ''; // Bersihkan dropdown
+        
+        if (categories && categories.length > 0) {
+            categories.forEach(cat => {
+                selectEl.innerHTML += `<option value="${cat}">${cat}</option>`;
+            });
+        } else {
+            selectEl.innerHTML = '<option value="">Belum ada kategori</option>';
+        }
+    }).getKategori();
+}
+
+// 3. [PENGGANTI PROMPT] Fungsi Buka Modal Input Kategori
+function tambahKategoriBaru() {
+    // Reset inputan biar bersih
+    document.getElementById('input-kategori-baru-val').value = ''; 
+    // Tampilkan Modal Kecil Baru
+    new bootstrap.Modal(document.getElementById('modalInputKategori')).show();
+    // Auto focus ke input biar user langsung ngetik
+    setTimeout(() => document.getElementById('input-kategori-baru-val').focus(), 500);
+}
+
+// 4. Fungsi Eksekusi Simpan ke Database
+function prosesSimpanKategoriBaru() {
+    const namaKategori = document.getElementById('input-kategori-baru-val').value;
+    
+    if(!namaKategori) return myAlert('Error', 'Nama kategori tidak boleh kosong!', 'warning');
+
+    // Tutup modal input kecil
+    const modalEl = document.getElementById('modalInputKategori');
+    const modalInstance = bootstrap.Modal.getInstance(modalEl);
+    modalInstance.hide();
+
+    loading(true); // Tampilkan loading
+
+    google.script.run.withSuccessHandler(() => {
+        loading(false); // Matikan loading
+        
+        // --- INI KUNCINYA: REFRESH DROPDOWN SETELAH SUKSES ---
+        refreshDropdownKategori(); 
+        
+        // Kasih notif sukses cantik
+        myAlert('Berhasil', `Kategori "${namaKategori}" ditambahkan!`, 'success');
+        
+    }).tambahKategori(namaKategori);
+}
+
+// Tambahan: Supaya bisa tekan ENTER di input kategori baru
+document.getElementById('input-kategori-baru-val').addEventListener("keypress", function(event) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    prosesSimpanKategoriBaru();
   }
+});
 
   // --- PAYROLL (TABS) ---
   function switchTab(t) {
@@ -2543,6 +2650,117 @@ function tampilkanInvoice(dataPayload, idTrx) {
     new bootstrap.Modal(document.getElementById('modalInvoice')).show();
 }
 
+function tutupInvoice() {
+    // Saat invoice ditutup, baru reset keranjang
+    resetKeranjang(); 
+}
+
+// --- FITUR FILTER CEPAT & EXPORT ---
+
+// [UPDATE REVISI] Logika Filter Cepat (Fix Reset Default)
+function setFilterCepat(pilihan, tipe) {
+    
+    // 1. Setup Awal (Default: Hari Ini)
+    const now = new Date();
+    let start = new Date(); 
+    let end = new Date();   
+
+    // Helper format YYYY-MM-DD
+    const fmt = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+
+    // 2. Logika Pilihan
+    // Jika Pilihan Kosong ("") ATAU "bulan_ini", kembalikan ke Default (Tgl 1 s/d Hari Ini)
+    if (pilihan === "" || pilihan === "bulan_ini") {
+        start = new Date(now.getFullYear(), now.getMonth(), 1); // Tgl 1 Bulan Ini
+        end = now; // Hari Ini
+    } else {
+        // Pilihan Lainnya
+        switch(pilihan) {
+            case 'hari_ini':
+                // Tidak perlu diubah, start & end sudah default 'now'
+                break; 
+            
+            case 'kemarin':
+                start.setDate(now.getDate() - 1);
+                end.setDate(now.getDate() - 1);
+                break;
+            
+            case '7_hari':
+                start.setDate(now.getDate() - 6); 
+                break;
+                
+            case 'bulan_lalu':
+                start = new Date(now.getFullYear(), now.getMonth() - 1, 1); 
+                end = new Date(now.getFullYear(), now.getMonth(), 0); 
+                break;
+        }
+    }
+
+    // 3. Eksekusi Update ke Input (Flatpickr)
+    const idStart = (tipe === 'JUAL') ? 'filter-jual-start' : 'filter-beli-start';
+    const idEnd = (tipe === 'JUAL') ? 'filter-jual-end' : 'filter-beli-end';
+
+    const elStart = document.getElementById(idStart);
+    const elEnd = document.getElementById(idEnd);
+
+    if (elStart && elStart._flatpickr) {
+        elStart._flatpickr.setDate(fmt(start), true);
+    }
+
+    if (elEnd && elEnd._flatpickr) {
+        elEnd._flatpickr.setDate(fmt(end), true);
+    }
+
+    // 4. Jalankan Filter Tabel Otomatis
+    terapkanFilter(tipe);
+}
+
+// 2. Export ke Excel (Format .xls HTML Table)
+function exportKeExcel(tableId, filename = 'Laporan') {
+    const table = document.getElementById(tableId);
+    let html = table.outerHTML;
+
+    // Bersihkan kolom 'Aksi' (Tombol) agar tidak ikut ke Excel
+    // Kita buat elemen sementara untuk manipulasi
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+    
+    // Hapus kolom terakhir (Aksi) di header dan body
+    const rows = tempDiv.querySelectorAll('tr');
+    rows.forEach(row => {
+        if(row.children.length > 0) {
+            row.removeChild(row.lastElementChild); // Hapus kolom terakhir (Aksi)
+        }
+    });
+
+    // Tambahkan CSS sederhana agar Excel rapi
+    const style = `
+      <style>
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+      </style>
+    `;
+
+    // Buat Blob
+    const finalHtml = style + tempDiv.innerHTML;
+    const blob = new Blob([finalHtml], { type: 'application/vnd.ms-excel' });
+    const url = URL.createObjectURL(blob);
+    
+    // Trigger Download
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename + '_' + new Date().toLocaleDateString('id-ID').replace(/\//g,'-') + '.xls';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
 // --- FUNGSI CETAK SLIP PIUTANG (REVISI TENGAH & RAPI) ---
 function cetakSlipPiutang(idTrx, pelanggan, total, jatuhTempo, mode) {
     
@@ -2688,124 +2906,13 @@ function cetakSlipPiutang(idTrx, pelanggan, total, jatuhTempo, mode) {
 
         <script>
             setTimeout(() => { window.print(); }, 800);
-        <\/script>
+        ` + '</sc' + 'ript>' + `
     </body>
     </html>
     `;
     
     win.document.write(htmlContent);
     win.document.close();
-}
-
-function tutupInvoice() {
-    // Saat invoice ditutup, baru reset keranjang
-    resetKeranjang(); 
-}
-
-// --- FITUR FILTER CEPAT & EXPORT ---
-
-// [UPDATE REVISI] Logika Filter Cepat (Fix Reset Default)
-function setFilterCepat(pilihan, tipe) {
-    
-    // 1. Setup Awal (Default: Hari Ini)
-    const now = new Date();
-    let start = new Date(); 
-    let end = new Date();   
-
-    // Helper format YYYY-MM-DD
-    const fmt = (d) => {
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${y}-${m}-${day}`;
-    };
-
-    // 2. Logika Pilihan
-    // Jika Pilihan Kosong ("") ATAU "bulan_ini", kembalikan ke Default (Tgl 1 s/d Hari Ini)
-    if (pilihan === "" || pilihan === "bulan_ini") {
-        start = new Date(now.getFullYear(), now.getMonth(), 1); // Tgl 1 Bulan Ini
-        end = now; // Hari Ini
-    } else {
-        // Pilihan Lainnya
-        switch(pilihan) {
-            case 'hari_ini':
-                // Tidak perlu diubah, start & end sudah default 'now'
-                break; 
-            
-            case 'kemarin':
-                start.setDate(now.getDate() - 1);
-                end.setDate(now.getDate() - 1);
-                break;
-            
-            case '7_hari':
-                start.setDate(now.getDate() - 6); 
-                break;
-                
-            case 'bulan_lalu':
-                start = new Date(now.getFullYear(), now.getMonth() - 1, 1); 
-                end = new Date(now.getFullYear(), now.getMonth(), 0); 
-                break;
-        }
-    }
-
-    // 3. Eksekusi Update ke Input (Flatpickr)
-    const idStart = (tipe === 'JUAL') ? 'filter-jual-start' : 'filter-beli-start';
-    const idEnd = (tipe === 'JUAL') ? 'filter-jual-end' : 'filter-beli-end';
-
-    const elStart = document.getElementById(idStart);
-    const elEnd = document.getElementById(idEnd);
-
-    if (elStart && elStart._flatpickr) {
-        elStart._flatpickr.setDate(fmt(start), true);
-    }
-
-    if (elEnd && elEnd._flatpickr) {
-        elEnd._flatpickr.setDate(fmt(end), true);
-    }
-
-    // 4. Jalankan Filter Tabel Otomatis
-    terapkanFilter(tipe);
-}
-
-// 2. Export ke Excel (Format .xls HTML Table)
-function exportKeExcel(tableId, filename = 'Laporan') {
-    const table = document.getElementById(tableId);
-    let html = table.outerHTML;
-
-    // Bersihkan kolom 'Aksi' (Tombol) agar tidak ikut ke Excel
-    // Kita buat elemen sementara untuk manipulasi
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = html;
-    
-    // Hapus kolom terakhir (Aksi) di header dan body
-    const rows = tempDiv.querySelectorAll('tr');
-    rows.forEach(row => {
-        if(row.children.length > 0) {
-            row.removeChild(row.lastElementChild); // Hapus kolom terakhir (Aksi)
-        }
-    });
-
-    // Tambahkan CSS sederhana agar Excel rapi
-    const style = `
-      <style>
-        table { border-collapse: collapse; width: 100%; }
-        th, td { border: 1px solid #000; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-      </style>
-    `;
-
-    // Buat Blob
-    const finalHtml = style + tempDiv.innerHTML;
-    const blob = new Blob([finalHtml], { type: 'application/vnd.ms-excel' });
-    const url = URL.createObjectURL(blob);
-    
-    // Trigger Download
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename + '_' + new Date().toLocaleDateString('id-ID').replace(/\//g,'-') + '.xls';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
 }
 
 // [UPDATE FIX] Laporan PDF: Header Besar & Berwarna, Tabel Ramping/Padat
