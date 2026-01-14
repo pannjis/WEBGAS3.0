@@ -19,13 +19,20 @@ window.onload = function() {
       // 1. Setup Database
       google.script.run.setupDatabase(); 
 
-      // 2. [FIX PENTING] Pindahkan semua Modal ke Body agar tidak tertutup layar gelap
+      // 2. Pindahkan Modal
       const modals = document.querySelectorAll('.modal');
       modals.forEach(m => document.body.appendChild(m));
 
       // 3. Init Modal Global
       initModal();
-  };
+      
+      // 4. Aktifkan Tanggal (Sekaligus isi default value)
+      initTanggal(); 
+      
+      // (Baris setAutoDate DIBUANG saja karena sudah di-handle initTanggal)
+
+      loadNotifHutang();
+};
 
 // --- LOGIKA PENCARIAN PELANGGAN ALA GOOGLE (UPDATE) ---
 
@@ -228,24 +235,28 @@ function showPage(pageId) {
     const targetPage = document.getElementById('page-' + pageId);
     if(targetPage) targetPage.classList.remove('d-none');
     
-    // 2. Update Navigasi Aktif
+    // 2. Update Navigasi Aktif (RESET SEMUA DULU)
     document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
-    const navEl = document.getElementById('nav-' + pageId);
     
-    if(pageId === 'riwayat-jual' || pageId === 'riwayat-beli') {
+    // 3. Set Aktif pada Tombol yang Diklik (JIKA ADA ID-NYA)
+    const navEl = document.getElementById('nav-' + pageId);
+    if(navEl) {
+        navEl.classList.add('active');
+    }
+    
+    // 4. Khusus Menu Riwayat: Pastikan Submenu Terbuka
+    if(pageId === 'riwayat-jual' || pageId === 'riwayat-beli' || pageId === 'riwayat-piutang') {
         const collapseRiwayat = document.getElementById('submenu-riwayat');
+        // Jika tertutup, buka secara manual
         if(collapseRiwayat && !collapseRiwayat.classList.contains('show')) {
             new bootstrap.Collapse(collapseRiwayat, { show: true });
         }
-    } else {
-        if(navEl) navEl.classList.add('active');
     }
     
-    // --- PENGECUALIAN (Data Berat/Filter) ---
-    // Riwayat Transaksi tetap kita load saat diklik karena datanya bisa banyak & butuh filter tanggal
+    // --- LOAD DATA (Sama seperti sebelumnya) ---
     if(pageId === 'riwayat-jual') {
         setAutoDate('jual'); 
-        loadRiwayatJual(); // Ini biarkan pakai loading(true) di dalamnya agar user tau sedang refresh
+        loadRiwayatJual(); 
     }
     if(pageId === 'riwayat-beli') {
         setAutoDate('beli'); 
@@ -253,6 +264,10 @@ function showPage(pageId) {
     }
     if(pageId === 'riwayat-piutang') loadPiutang();
     if(pageId === 'pembelian') loadPembelianData();
+    if(pageId === 'edit-produk') {
+       // Opsional: Jika user refresh saat di halaman edit, kembalikan ke produk
+       // showPage('produk'); 
+    }
 }
 
 function handleLogin() {
@@ -589,8 +604,8 @@ function loadProduk() {
       const tb = document.querySelector('#tabel-produk tbody');
       if(tb) {
          tb.innerHTML = ''; // Kosongkan tabel dulu
-         data.forEach(r => {
-            // Mapping Index: 0:ID, 1:Nama, 2:Jual, 3:Beli, 4:Stok Isi, 5:Stok Kosong
+            data.forEach(r => {
+            // r[0]: ID (PENTING UNTUK EDIT), r[1]: Nama, dll
             tb.innerHTML += `
               <tr>
                 <td class="fw-bold">${r[1]}</td>
@@ -599,6 +614,10 @@ function loadProduk() {
                 <td class="text-center">${r[4]}</td>
                 <td class="text-center">${r[5]}</td>
                 <td>
+                   <button class="btn btn-sm btn-warning text-dark border me-1" onclick="bukaHalamanEdit('${r[0]}')">
+                     <i class="material-icons" style="font-size:14px">edit</i>
+                   </button>
+                   
                    <button class="btn btn-sm btn-light text-danger border" onclick="hapusProduk('${r[1]}')">
                      <i class="material-icons" style="font-size:14px">delete</i>
                    </button>
@@ -616,6 +635,112 @@ function loadProduk() {
       }
 
     }).getData('PRODUK');
+}
+
+// 1. Fungsi Membuka Halaman Edit & Isi Data
+function bukaHalamanEdit(id) {
+    // Cari data produk di variabel global berdasarkan ID (Kolom 0)
+    const produk = globalProdukList.find(row => row[0] == id);
+    
+    if (!produk) return myAlert('Error', 'Data produk tidak ditemukan.', 'error');
+
+    // Isi Form Edit dengan Data Lama
+    document.getElementById('edit-prod-id').value = produk[0]; // ID
+    document.getElementById('edit-prod-nama').value = produk[1];
+    document.getElementById('edit-prod-jual').value = produk[2];
+    document.getElementById('edit-prod-beli').value = produk[3];
+    
+    // Stok (Read Only)
+    document.getElementById('edit-prod-isi').value = produk[4];
+    document.getElementById('edit-prod-kosong').value = produk[5];
+
+    // Info Tambahan
+    document.getElementById('edit-prod-sku').value = produk[6] || '';
+    document.getElementById('edit-prod-kode').value = produk[7] || '';
+
+    // Preview Gambar Lama
+    const imgUrl = produk[8];
+    const imgPrev = document.getElementById('edit-img-preview');
+    if(imgUrl && imgUrl.includes('http')) {
+        imgPrev.src = imgUrl;
+        imgPrev.classList.remove('d-none');
+    } else {
+        imgPrev.src = ''; 
+        imgPrev.classList.add('d-none');
+    }
+
+    // Reset Input File
+    document.getElementById('edit-prod-file').value = '';
+
+    // Pindah Tampilan ke Halaman Edit
+    showPage('edit-produk');
+}
+
+// 2. Helper Preview Image di Halaman Edit
+function previewEditImage(input) {
+    const preview = document.getElementById('edit-img-preview');
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            preview.src = e.target.result;
+            preview.classList.remove('d-none');
+        }
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+
+// 3. Proses Simpan ke Server
+function prosesSimpanEdit() {
+    const fileInput = document.getElementById('edit-prod-file');
+    const file = fileInput.files[0];
+
+    // Ambil Data Form
+    const payload = {
+        id: document.getElementById('edit-prod-id').value,
+        nama: document.getElementById('edit-prod-nama').value,
+        hargaJual: document.getElementById('edit-prod-jual').value,
+        hargaBeli: document.getElementById('edit-prod-beli').value,
+        sku: document.getElementById('edit-prod-sku').value,
+        kode: document.getElementById('edit-prod-kode').value,
+        gambar: null // Default null (tidak ganti)
+    };
+
+    if(!payload.nama) return myAlert('Error', 'Nama produk tidak boleh kosong', 'warning');
+
+    // Fungsi Pengirim
+    const kirimUpdate = (data) => {
+        loading(true);
+        google.script.run
+            .withSuccessHandler(res => {
+                loading(false);
+                myAlert('Sukses', res, 'success');
+                showPage('produk'); // Kembali ke tabel
+                loadProduk();       // Refresh data tabel
+            })
+            .withFailureHandler(err => {
+                loading(false);
+                myAlert('Gagal', err.message, 'error');
+            })
+            .updateProduk(data);
+    };
+
+    // Cek Upload Gambar Baru
+    if (file) {
+        if (file.size > 2 * 1024 * 1024) return myAlert('File Besar', 'Maksimal 2MB', 'warning');
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            payload.gambar = {
+                data: e.target.result.split(',')[1],
+                mimeType: file.type,
+                fileName: file.name
+            };
+            kirimUpdate(payload);
+        };
+        reader.readAsDataURL(file);
+    } else {
+        kirimUpdate(payload);
+    }
 }
 
 // Fungsi Render Grid
@@ -1138,6 +1263,21 @@ function updateHargaBeli() {
   }
 }
 
+// [BARU] Fungsi khusus saat Ganti Produk di Dropdown
+function setHargaOtomatis() {
+  const sel = document.getElementById('beli-produk');
+  const hargaInput = document.getElementById('beli-harga');
+  
+  // 1. Ambil harga dari database (atribut data-buy)
+  const hargaDatabase = sel.options[sel.selectedIndex]?.getAttribute('data-buy') || 0;
+  
+  // 2. Paksa Update Input Harga dengan format Ribuan
+  hargaInput.value = Number(hargaDatabase).toLocaleString('id-ID');
+  
+  // 3. Panggil fungsi lama untuk hitung Subtotal
+  updateHargaBeli(); 
+}
+
   function tambahKeKeranjangBeli() {
       const prod = document.getElementById('beli-produk').value;
       const qty = Number(document.getElementById('beli-qty').value);
@@ -1461,6 +1601,85 @@ function terapkanFilter(tipe) {
     if(foundCount === 0) {
        // Opsional: Tampilkan pesan jika tidak ada hasil
        // myAlert('Info', 'Data tidak ditemukan dengan filter tersebut.');
+    }
+}
+
+// --- KONFIGURASI TANGGAL (FLATPICKR) ---
+
+// --- KONFIGURASI TANGGAL (FIX ANTI BLANK) ---
+function initTanggal() {
+    const today = new Date();
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1); // Tgl 1 Bulan Ini
+
+    // Config Dasar
+    const baseConfig = {
+        dateFormat: "Y-m-d",
+        altInput: true,
+        altFormat: "d/m/Y",
+        locale: "id",
+        allowInput: true,
+        disableMobile: "true"
+    };
+
+    // 1. Init Kolom "DARI TANGGAL" (Set Default: Tanggal 1)
+    flatpickr("#filter-jual-start, #filter-beli-start", {
+        ...baseConfig,
+        defaultDate: firstDay // <--- INI KUNCINYA (Langsung isi Tgl 1)
+    });
+
+    // 2. Init Kolom "SAMPAI TANGGAL" (Set Default: Hari Ini)
+    flatpickr("#filter-jual-end, #filter-beli-end", {
+        ...baseConfig,
+        defaultDate: today // <--- INI KUNCINYA (Langsung isi Hari Ini)
+    });
+
+    // 3. Init Kolom Jatuh Tempo (Set Default: 7 Hari lagi)
+    const nextWeek = new Date();
+    nextWeek.setDate(nextWeek.getDate() + 7);
+    flatpickr("#pos-jatuh-tempo", {
+        ...baseConfig,
+        defaultDate: nextWeek
+    });
+
+    // 4. Init Sisanya (Input tanggal lain yang mungkin ada)
+    flatpickr("input[type=date]:not(.flatpickr-input)", {
+        ...baseConfig
+    });
+}
+// [UPDATE] Fungsi Auto Date agar support Flatpickr & Tampilan Langsung Muncul
+function setAutoDate(tipe) {
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1); 
+
+    const toStr = (d) => {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
+    const strStart = toStr(firstDay);
+    const strEnd = toStr(now);
+
+    const elStart = document.getElementById(`filter-${tipe}-start`);
+    const elEnd = document.getElementById(`filter-${tipe}-end`);
+
+    // LOGIKA UPDATE: Tambahkan parameter true agar UI merefresh
+    if(elStart) {
+        if(elStart._flatpickr) {
+            // Parameter 'true' memaksa tampilan input berubah
+            elStart._flatpickr.setDate(strStart, true); 
+        } else {
+            elStart.value = strStart;
+        }
+    }
+
+    if(elEnd) {
+        if(elEnd._flatpickr) {
+            elEnd._flatpickr.setDate(strEnd, true);
+        } else {
+            elEnd.value = strEnd;
+        }
     }
 }
 
@@ -2291,5 +2510,248 @@ function tampilkanInvoice(dataPayload, idTrx) {
 function tutupInvoice() {
     // Saat invoice ditutup, baru reset keranjang
     resetKeranjang(); 
+}
+
+// --- FITUR FILTER CEPAT & EXPORT ---
+
+// [UPDATE REVISI] Logika Filter Cepat (Fix Reset Default)
+function setFilterCepat(pilihan, tipe) {
+    
+    // 1. Setup Awal (Default: Hari Ini)
+    const now = new Date();
+    let start = new Date(); 
+    let end = new Date();   
+
+    // Helper format YYYY-MM-DD
+    const fmt = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+
+    // 2. Logika Pilihan
+    // Jika Pilihan Kosong ("") ATAU "bulan_ini", kembalikan ke Default (Tgl 1 s/d Hari Ini)
+    if (pilihan === "" || pilihan === "bulan_ini") {
+        start = new Date(now.getFullYear(), now.getMonth(), 1); // Tgl 1 Bulan Ini
+        end = now; // Hari Ini
+    } else {
+        // Pilihan Lainnya
+        switch(pilihan) {
+            case 'hari_ini':
+                // Tidak perlu diubah, start & end sudah default 'now'
+                break; 
+            
+            case 'kemarin':
+                start.setDate(now.getDate() - 1);
+                end.setDate(now.getDate() - 1);
+                break;
+            
+            case '7_hari':
+                start.setDate(now.getDate() - 6); 
+                break;
+                
+            case 'bulan_lalu':
+                start = new Date(now.getFullYear(), now.getMonth() - 1, 1); 
+                end = new Date(now.getFullYear(), now.getMonth(), 0); 
+                break;
+        }
+    }
+
+    // 3. Eksekusi Update ke Input (Flatpickr)
+    const idStart = (tipe === 'JUAL') ? 'filter-jual-start' : 'filter-beli-start';
+    const idEnd = (tipe === 'JUAL') ? 'filter-jual-end' : 'filter-beli-end';
+
+    const elStart = document.getElementById(idStart);
+    const elEnd = document.getElementById(idEnd);
+
+    if (elStart && elStart._flatpickr) {
+        elStart._flatpickr.setDate(fmt(start), true);
+    }
+
+    if (elEnd && elEnd._flatpickr) {
+        elEnd._flatpickr.setDate(fmt(end), true);
+    }
+
+    // 4. Jalankan Filter Tabel Otomatis
+    terapkanFilter(tipe);
+}
+
+// 2. Export ke Excel (Format .xls HTML Table)
+function exportKeExcel(tableId, filename = 'Laporan') {
+    const table = document.getElementById(tableId);
+    let html = table.outerHTML;
+
+    // Bersihkan kolom 'Aksi' (Tombol) agar tidak ikut ke Excel
+    // Kita buat elemen sementara untuk manipulasi
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+    
+    // Hapus kolom terakhir (Aksi) di header dan body
+    const rows = tempDiv.querySelectorAll('tr');
+    rows.forEach(row => {
+        if(row.children.length > 0) {
+            row.removeChild(row.lastElementChild); // Hapus kolom terakhir (Aksi)
+        }
+    });
+
+    // Tambahkan CSS sederhana agar Excel rapi
+    const style = `
+      <style>
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+      </style>
+    `;
+
+    // Buat Blob
+    const finalHtml = style + tempDiv.innerHTML;
+    const blob = new Blob([finalHtml], { type: 'application/vnd.ms-excel' });
+    const url = URL.createObjectURL(blob);
+    
+    // Trigger Download
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename + '_' + new Date().toLocaleDateString('id-ID').replace(/\//g,'-') + '.xls';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+// [UPDATE FIX] Laporan PDF: Header Besar & Berwarna, Tabel Ramping/Padat
+function printLaporanPDF(tableId, judulLaporan) {
+    const table = document.getElementById(tableId);
+    
+    // 1. Ambil Data Perusahaan
+    const namaPT = globalCompanyProfile.nama_perusahaan || 'NAMA PERUSAHAAN';
+    const alamatPT = globalCompanyProfile.alamat || 'Alamat perusahaan belum diatur';
+    const noPT = globalCompanyProfile.no_perusahaan || '-';
+    const logoUrl = globalCompanyProfile.logo_perusahaan || ''; 
+
+    // 2. Siapkan Logo (Ukuran Normal 70px)
+    let htmlLogo = '';
+    if (logoUrl) {
+        htmlLogo = `<img src="${logoUrl}" style="height: 75px; width: auto; margin-right: 20px;">`;
+    }
+
+    // 3. Header KOP SURAT (Dibuat Besar & Jelas Kembali)
+    const headerHtml = `
+        <div style="display: flex; align-items: center; justify-content: center; border-bottom: 3px double #333; padding-bottom: 15px; margin-bottom: 20px;">
+            ${htmlLogo}
+            <div style="text-align: center;">
+                <h2 style="margin: 0; font-size: 20pt; font-weight: 800; text-transform: uppercase; color: #d32f2f; line-height: 1;">${namaPT}</h2>
+                <div style="font-size: 10pt; font-weight: bold; margin-top: 5px; color: #333;">${alamatPT}</div>
+                <div style="font-size: 10pt; color: #555;">Telp: ${noPT}</div>
+            </div>
+        </div>
+        
+        <div style="text-align: center; margin-bottom: 15px;">
+            <h3 style="margin: 0; text-transform: uppercase; font-size: 14pt; font-weight:bold; text-decoration: underline;">${judulLaporan}</h3>
+            <small style="color: #555; font-style: italic;">Dicetak pada: ${new Date().toLocaleString('id-ID')}</small>
+        </div>
+    `;
+
+    // 4. Clone Tabel & Bersihkan Kolom Aksi
+    let tableClone = table.cloneNode(true);
+    
+    // Hapus kolom terakhir (Aksi) di Header
+    const ths = tableClone.querySelectorAll('th');
+    if(ths.length > 0) ths[ths.length - 1].remove();
+
+    // Hapus kolom terakhir (Aksi) di Body
+    const rows = tableClone.querySelectorAll('tr');
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if(cells.length > 0) cells[cells.length - 1].remove();
+    });
+
+    // 5. Buka Jendela Print
+    const win = window.open('', '', 'height=800,width=1100');
+    
+    // 6. CSS KHUSUS (Header Besar, Tabel Ramping, Warna NYALA)
+    const cssStyle = `
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
+            
+            /* Paksa Browser Cetak Warna Background */
+            body { 
+                font-family: 'Roboto', sans-serif; 
+                padding: 30px; 
+                color: #000;
+                -webkit-print-color-adjust: exact !important; 
+                print-color-adjust: exact !important;
+            }
+
+            /* --- STYLING TABEL (RAMPING) --- */
+            table { 
+                width: 100%; 
+                border-collapse: collapse; 
+                margin-top: 5px; 
+                font-size: 9pt; /* Font isi tabel kecil pas */
+            }
+            
+            /* Header Tabel: Warna Abu Terang, Padding Rapat */
+            th { 
+                background-color: #e0e0e0 !important; /* Warna Abu Wajib !important */
+                color: #000; 
+                font-weight: bold; 
+                text-transform: uppercase; 
+                padding: 6px 4px; /* Atas-Bawah 6px (Rapat), Kiri-Kanan 4px */
+                border: 1px solid #666; 
+                text-align: center;
+                font-size: 8.5pt;
+            }
+
+            /* Isi Tabel: Padding Sangat Rapat agar Baris Pendek */
+            td { 
+                padding: 4px 5px; /* INI KUNCINYA: Padding kecil bikin baris pendek */
+                border: 1px solid #999; 
+                vertical-align: middle; 
+                line-height: 1.2; /* Jarak antar baris teks didalam sel rapat */
+            }
+
+            /* Warna Baris Selang-seling */
+            tr:nth-child(even) td { background-color: #f9f9f9 !important; }
+
+            /* Kembalikan Warna Teks (Biru/Merah) */
+            .text-primary { color: #0d6efd !important; font-weight: bold; }
+            .text-danger { color: #dc3545 !important; font-weight: bold; }
+            .fw-bold { font-weight: bold; }
+            .text-muted { color: #666 !important; font-size: 0.85em; }
+            
+            /* Utility */
+            .text-end { text-align: right; }
+            .text-center { text-align: center; }
+
+            /* Footer Halaman */
+            @page { margin: 10mm; size: A4; }
+        </style>
+    `;
+
+    win.document.write('<html><head><title>Laporan - SiGAS PRO</title>');
+    win.document.write(cssStyle);
+    win.document.write('</head><body>');
+    win.document.write(headerHtml);
+    win.document.write(tableClone.outerHTML);
+    
+    // TTD Admin
+    win.document.write(`
+        <div style="margin-top: 30px; display: flex; justify-content: flex-end; page-break-inside: avoid;">
+            <div style="text-align: center; width: 180px;">
+                <small style="font-size:9pt;">Dibuat Oleh,</small>
+                <br><br><br><br>
+                <div style="border-bottom: 1px solid #000; font-weight: bold; font-size:10pt;">( Admin )</div>
+            </div>
+        </div>
+    `);
+
+    win.document.write('</body></html>');
+    win.document.close();
+    
+    // Jeda sedikit agar logo terload sempurna sebelum dialog print muncul
+    setTimeout(() => {
+        win.focus();
+        win.print();
+    }, 800);
 }
 </script>
