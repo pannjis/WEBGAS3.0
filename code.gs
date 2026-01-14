@@ -920,14 +920,13 @@ function simpanKeuangan(form) {
               sheet.getRange(i+1, 5).setValue(form.nominal);
               sheet.getRange(i+1, 6).setValue(form.keterangan);
               
-              // [PENTING] INI YANG MEMBUAT ERROR HILANG
-              // Kita harus mengembalikan Object, bukan cuma string "Sukses"
+              // [PENTING] HARUS ADA RETURN OBJECT INI
               return { 
                   status: 'success', 
                   msg: 'Data Berhasil Diupdate',
                   data: { 
                       id: form.id, 
-                      tanggal: tglInput, 
+                      tanggal: tglInput.toISOString(), // Gunakan ISOString agar aman 
                       jenis: form.jenis, 
                       kategori: form.kategori, 
                       nominal: form.nominal, 
@@ -951,13 +950,13 @@ function simpanKeuangan(form) {
   
   SpreadsheetApp.flush(); 
   
-  // [PENTING] JANGAN LUPA BAGIAN INI
+  // [PENTING] HARUS ADA RETURN OBJECT INI UNTUK DATA BARU
   return { 
       status: 'success', 
       msg: 'Data Berhasil Disimpan',
       data: { 
           id: newId, 
-          tanggal: tglInput, 
+          tanggal: tglInput.toISOString(), 
           jenis: form.jenis, 
           kategori: form.kategori, 
           nominal: form.nominal, 
