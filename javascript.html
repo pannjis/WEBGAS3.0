@@ -2144,7 +2144,7 @@ function loadKeuangan() {
     }).getData('KEUANGAN');
 }
 
-// 2. FUNGSI RENDER TABEL (Menerima Data Array)
+// [UPDATE] FUNGSI RENDER TABEL KEUANGAN (DENGAN TOMBOL CETAK)
 function renderTabelKeuangan(data) {
     const tb = document.querySelector('#tabel-keuangan tbody'); 
     tb.innerHTML = '';
@@ -2154,19 +2154,16 @@ function renderTabelKeuangan(data) {
         return; 
     }
 
-    // Kita render data yang diterima (bisa data full, bisa data hasil filter)
-    // Gunakan slice(0, 50) jika ingin membatasi tampilan agar tidak berat (opsional)
     data.slice(0, 100).forEach(r => {
         // r[0]: ID, r[1]: Tanggal, r[2]: Jenis, r[3]: Kategori, r[4]: Nominal, r[5]: Ket
         
-        // Format Tanggal: 14/01/2026
         let tglDisplay = '-';
-        let timestamp = 0; // Untuk sorting/filter teknis
+        let timestamp = 0;
         
         try { 
             if(r[1]) {
                 let d = new Date(r[1]);
-                timestamp = d.getTime(); // Simpan timestamp untuk filter
+                timestamp = d.getTime(); 
                 let dd = String(d.getDate()).padStart(2, '0');
                 let mm = String(d.getMonth() + 1).padStart(2, '0');
                 let yyyy = d.getFullYear();
@@ -2181,10 +2178,25 @@ function renderTabelKeuangan(data) {
         let isManual = String(r[0]).includes('MANUAL');
         let aksiTombol = '';
         
+        // Bersihkan tanda petik di keterangan agar tidak merusak HTML onclick
+        let safeKet = r[5] ? r[5].toString().replace(/'/g, "\\'").replace(/"/g, '&quot;') : "";
+        let safeDate = r[1]; 
+
+        // [BARU] Tombol Cetak (Re-usable string)
+        let btnCetak = `
+            <button class="btn btn-sm btn-info text-white py-0 px-2 me-1" 
+                onclick="siapkanCetak('${r[0]}', '${safeDate}', '${r[2]}', '${r[3]}', ${r[4]}, '${safeKet}')" 
+                title="Cetak Slip">
+                <i class="material-icons" style="font-size:14px">print</i>
+            </button>
+        `;
+        
         if(isManual) {
+            // Jika Manual: Tombol Cetak + Edit + Hapus
             aksiTombol = `
+            ${btnCetak}
             <button class="btn btn-sm btn-warning text-dark py-0 px-2" 
-                onclick="editKeuangan('${r[0]}', '${r[1]}', '${r[2]}', '${r[3]}', ${r[4]}, '${r[5]}')" title="Edit">
+                onclick="editKeuangan('${r[0]}', '${safeDate}', '${r[2]}', '${r[3]}', ${r[4]}, '${safeKet}')" title="Edit">
                 <i class="material-icons" style="font-size:14px">edit</i>
             </button>
             <button class="btn btn-sm btn-light text-danger border py-0 px-2 ms-1" onclick="hapusKeuangan('${r[0]}')" title="Hapus">
@@ -2192,14 +2204,15 @@ function renderTabelKeuangan(data) {
             </button>
             `;
         } else {
+            // Jika Auto: Tombol Cetak + Badge Auto
             aksiTombol = `
+            ${btnCetak}
             <span class="badge bg-light text-muted border" title="Data Otomatis">
                 <i class="material-icons align-middle" style="font-size:12px">lock</i> Auto
             </span>
             `;
         }
 
-        // Kita tambahkan data-ts (timestamp) di TR untuk keperluan debug/sorting lanjutan jika perlu
         tb.innerHTML += `
         <tr data-ts="${timestamp}">
             <td>${tglDisplay}</td>
@@ -2207,9 +2220,23 @@ function renderTabelKeuangan(data) {
             <td>${r[3]}</td>
             <td class="${colorClass} fw-bold">${nominal}</td>
             <td><small class="text-muted text-truncate d-block" style="max-width: 150px;">${r[5]}</small></td>
-            <td class="text-center">${aksiTombol}</td>
+            <td class="text-center" style="white-space: nowrap;">${aksiTombol}</td>
         </tr>`;
     });
+}
+
+// [BARU] Helper untuk tombol cetak di tabel
+function siapkanCetak(id, tgl, jenis, kat, nom, ket) {
+    const dataObj = {
+        id: id,
+        tanggal: tgl, // Format tanggal raw dari DB
+        jenis: jenis,
+        kategori: kat,
+        nominal: nom,
+        ket: ket
+    };
+    // Panggil fungsi cetak nota yang sudah kita perbaiki sebelumnya
+    cetakNotaKeuangan(dataObj);
 }
 
 // 3. FUNGSI FILTER KEUANGAN
@@ -2358,6 +2385,7 @@ function simpanKeuangan() {
     const btn = document.getElementById('btn-simpan-keuangan');
     const idEdit = btn.getAttribute('data-id'); 
     
+    // ... (kode pengambilan value input tetap sama) ...
     const tgl = document.getElementById('keu-tanggal').value;
     const jenis = document.getElementById('keu-jenis').value;
     const kategori = document.getElementById('keu-kategori').value;
@@ -2382,6 +2410,15 @@ function simpanKeuangan() {
     google.script.run.withSuccessHandler(res => { 
         loading(false);
         
+        // [UPDATE FIX] Cek apakah res ada isinya?
+        if (!res) {
+            // Jika res null, berarti error di server tapi tidak fatal
+            bootstrap.Modal.getInstance(document.getElementById('modalKeuangan')).hide();
+            loadKeuangan(); 
+            loadDashboard();
+            return; 
+        }
+
         // Tutup Modal Input
         bootstrap.Modal.getInstance(document.getElementById('modalKeuangan')).hide();
         
@@ -2390,15 +2427,16 @@ function simpanKeuangan() {
         loadDashboard(); 
 
         // --- KONFIRMASI CETAK NOTA ---
+        // Sekarang aman karena sudah dicek 'res' tidak null
         if(res.status === 'success') {
-            // Tampilkan Confirm khusus print
             myConfirm('Berhasil Disimpan', 'Apakah Anda ingin mencetak Nota Bukti Transaksi ini?', () => {
-                cetakNotaKeuangan(res.data); // Panggil fungsi cetak
+                cetakNotaKeuangan(res.data); 
             });
         }
 
     }).simpanKeuangan(dataKirim);
 }
+
 // 2. Fungsi Refresh Dropdown (Dipisahkan agar bisa dipanggil ulang)
 function refreshDropdownKategori() {
     const selectEl = document.getElementById('keu-kategori');
@@ -3258,7 +3296,7 @@ function printLaporanPDF(tableId, judulLaporan) {
     }, 800);
 }
 
-// --- FUNGSI CETAK NOTA KEUANGAN (KAS MASUK / KELUAR) ---
+// --- FUNGSI CETAK NOTA KEUANGAN (A5 LANDSCAPE + 3 TANDA TANGAN) ---
 function cetakNotaKeuangan(data) {
     // 1. Ambil Profil Perusahaan
     const namaPT = globalCompanyProfile.nama_perusahaan || 'NAMA PERUSAHAAN';
@@ -3268,22 +3306,22 @@ function cetakNotaKeuangan(data) {
     
     let htmlLogo = '';
     if (logoUrl) {
-        htmlLogo = `<img src="${logoUrl}" style="height: 60px; width: auto; margin-right: 15px;">`;
+        htmlLogo = `<img src="${logoUrl}" style="height: 50px; width: auto; margin-right: 15px;">`;
     }
 
-    // 2. Tentukan Judul & Warna
+    // 2. Tentukan Judul, Warna & Label Tanda Tangan Ketiga
     let judulDokumen = '';
     let warnaHeader = '';
-    let labelTerima = '';
-
+    let labelPihakKetiga = ''; // <--- Variabel Baru
+    
     if (data.jenis === 'Pemasukan') {
         judulDokumen = 'BUKTI KAS MASUK';
         warnaHeader = '#198754'; // Hijau
-        labelTerima = 'Diterima Dari';
+        labelPihakKetiga = 'Penyetor / Pelanggan'; // Orang yang ngasih duit
     } else {
         judulDokumen = 'BUKTI KAS KELUAR';
         warnaHeader = '#dc3545'; // Merah
-        labelTerima = 'Dibayarkan Kepada';
+        labelPihakKetiga = 'Penerima Uang'; // Orang yang terima duit
     }
 
     // Format Tanggal
@@ -3298,36 +3336,85 @@ function cetakNotaKeuangan(data) {
         <title>Cetak Nota - ${data.id}</title>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
-            body { font-family: 'Roboto', sans-serif; padding: 20px; color: #333; -webkit-print-color-adjust: exact; }
             
-            .container { border: 1px solid #ccc; padding: 30px; max-width: 700px; margin: 0 auto; position: relative; }
-            
-            .header { display: flex; align-items: center; border-bottom: 2px solid #333; padding-bottom: 15px; margin-bottom: 25px; }
-            .header-text h2 { margin: 0; font-size: 20px; color: #333; text-transform: uppercase; }
-            .header-text p { margin: 2px 0 0; font-size: 11px; color: #555; }
-            
-            .judul-nota { 
-                text-align: center; font-size: 18px; font-weight: bold; 
-                background-color: ${warnaHeader}; color: white; 
-                padding: 8px; margin-bottom: 20px; border-radius: 4px; letter-spacing: 1px;
+            @page { 
+                size: A5 landscape; 
+                margin: 0; 
             }
 
-            .info-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            .info-table td { padding: 8px 5px; vertical-align: top; font-size: 14px; }
-            .label { font-weight: bold; width: 140px; color: #555; }
+            body { 
+                font-family: 'Roboto', sans-serif; 
+                padding: 10mm; 
+                margin: 0;
+                color: #333; 
+                -webkit-print-color-adjust: exact; 
+                print-color-adjust: exact;
+                background-color: white;
+            }
+            
+            .container { 
+                border: 2px solid #333; 
+                padding: 20px; 
+                width: 100%; 
+                height: 100%; 
+                box-sizing: border-box; 
+                position: relative; 
+            }
+            
+            .header { 
+                display: flex; 
+                align-items: center; 
+                border-bottom: 2px solid #333; 
+                padding-bottom: 10px; 
+                margin-bottom: 15px; 
+            }
+            .header-text h2 { margin: 0; font-size: 18px; color: #333; text-transform: uppercase; }
+            .header-text p { margin: 0; font-size: 10px; color: #555; }
+            
+            .judul-nota { 
+                text-align: center; font-size: 16px; font-weight: bold; 
+                background-color: ${warnaHeader}; color: white; 
+                padding: 5px; margin-bottom: 15px; border-radius: 4px; letter-spacing: 1px;
+                -webkit-print-color-adjust: exact;
+            }
+
+            .row-content { display: flex; gap: 20px; }
+            .col-left { flex: 1; }
+            .col-right { flex: 1; display: flex; align-items: center; justify-content: center; flex-direction: column; }
+
+            .info-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+            .info-table td { padding: 4px 5px; vertical-align: top; font-size: 12px; } 
+            .label { font-weight: bold; width: 120px; color: #555; }
             .separator { width: 10px; }
             .isi { border-bottom: 1px dotted #ccc; font-weight: 500; }
             
             .nominal-box { 
                 background: #f8f9fa; border: 2px dashed ${warnaHeader}; 
-                padding: 10px 20px; font-size: 24px; font-weight: bold; 
-                color: ${warnaHeader}; display: inline-block; margin-top: 10px;
+                padding: 10px 30px; font-size: 22px; font-weight: bold; 
+                color: ${warnaHeader}; display: inline-block; margin-top: 5px;
                 border-radius: 8px;
+                text-align: center;
             }
+            .terbilang-label { font-size: 10px; color: #777; margin-top: 5px; }
 
-            .footer { display: flex; justify-content: space-between; margin-top: 50px; text-align: center; }
-            .ttd-box { width: 200px; }
-            .ttd-line { border-bottom: 1px solid #000; margin-top: 60px; font-weight: bold; }
+            /* --- UPDATED FOOTER (3 KOLOM) --- */
+            .footer { 
+                display: flex; 
+                justify-content: space-between; /* Agar 3 kolom rata kiri-tengah-kanan */
+                margin-top: 25px; 
+                text-align: center; 
+                padding: 0 10px;
+            }
+            .ttd-box { width: 30%; } /* Lebar proporsional untuk 3 kolom */
+            .ttd-line { border-bottom: 1px solid #000; margin-top: 50px; font-weight: bold; font-size: 12px;}
+            
+            .timestamp {
+                position: absolute;
+                bottom: 5px;
+                left: 0; right: 0;
+                font-size: 8px; color: #999; 
+                text-align: center;
+            }
         </style>
     </head>
     <body>
@@ -3343,30 +3430,33 @@ function cetakNotaKeuangan(data) {
 
             <div class="judul-nota">${judulDokumen}</div>
 
-            <table class="info-table">
-                <tr>
-                    <td class="label">Nomor Transaksi</td><td class="separator">:</td>
-                    <td class="isi">${data.id}</td>
-                </tr>
-                <tr>
-                    <td class="label">Tanggal</td><td class="separator">:</td>
-                    <td class="isi">${tglStr}</td>
-                </tr>
-                <tr>
-                    <td class="label">Kategori</td><td class="separator">:</td>
-                    <td class="isi">${data.kategori}</td>
-                </tr>
-                <tr>
-                    <td class="label">Keterangan</td><td class="separator">:</td>
-                    <td class="isi" style="font-style: italic;">"${data.ket}"</td>
-                </tr>
-                <tr>
-                    <td class="label">Jumlah Uang</td><td class="separator">:</td>
-                    <td>
-                        <div class="nominal-box">${rupiah(data.nominal)}</div>
-                    </td>
-                </tr>
-            </table>
+            <div class="row-content">
+                <div class="col-left">
+                    <table class="info-table">
+                        <tr>
+                            <td class="label">No. Transaksi</td><td class="separator">:</td>
+                            <td class="isi">${data.id}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Tanggal</td><td class="separator">:</td>
+                            <td class="isi">${tglStr}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Kategori</td><td class="separator">:</td>
+                            <td class="isi">${data.kategori}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Keterangan</td><td class="separator">:</td>
+                            <td class="isi" style="font-style: italic;">"${data.ket}"</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="col-right">
+                    <div class="terbilang-label">JUMLAH UANG</div>
+                    <div class="nominal-box">${rupiah(data.nominal)}</div>
+                </div>
+            </div>
 
             <div class="footer">
                 <div class="ttd-box">
@@ -3377,9 +3467,13 @@ function cetakNotaKeuangan(data) {
                     <small>Dibuat Oleh,</small>
                     <div class="ttd-line">( Admin Keuangan )</div>
                 </div>
+                <div class="ttd-box">
+                    <small>${labelPihakKetiga},</small>
+                    <div class="ttd-line">( ....................... )</div>
+                </div>
             </div>
             
-            <div style="font-size: 9px; color: #999; margin-top: 20px; text-align: center;">
+            <div class="timestamp">
                 Dicetak otomatis oleh Sistem SiGAS PRO pada ${new Date().toLocaleString('id-ID')}
             </div>
         </div>
