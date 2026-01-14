@@ -2117,94 +2117,190 @@ function loadPelangganDropdown(targetNama = null) {
     }).getListPelanggan();
 }
 
+// --- LOAD KEUANGAN DENGAN PROTEKSI ---
 function loadKeuangan() {
-    
     google.script.run.withSuccessHandler(d => {
       
       const tb = document.querySelector('#tabel-keuangan tbody'); 
       tb.innerHTML='';
 
-      // --- [PERBAIKAN] PENGAMAN DATA KOSONG ---
       if (!d || d.length === 0) {
-          tb.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Belum ada data keuangan.</td></tr>';
-          return; // Stop di sini agar tidak lanjut ke .reverse()
+          tb.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Belum ada data keuangan.</td></tr>';
+          return; 
       }
-      // ----------------------------------------
 
-      // Render Data (Hanya jalan jika data ADA)
-      d.reverse().slice(0,10).forEach(r => {
-          let tgl = r[1];
-          try { tgl = new Date(r[1]).toLocaleDateString(); } catch(e){}
+      // Render Data (Maks 20 Baris Terakhir)
+      d.reverse().slice(0, 20).forEach(r => {
+          // r[0]: ID, r[1]: Tanggal, r[2]: Jenis, r[3]: Kategori, r[4]: Nominal, r[5]: Ket
+          
+          let tgl = '-';
+          try { 
+              if(r[1]) {
+                  tgl = new Date(r[1]).toLocaleDateString('id-ID', {
+                      day: 'numeric', month: 'short', year: 'numeric'
+                  });
+              }
+          } catch(e){ console.log(e); }
+
+          let colorClass = r[2] === 'Pemasukan' ? 'text-success' : 'text-danger';
+          let nominal = rupiah(r[4]);
+
+          // --- LOGIKA PROTEKSI ---
+          // Cek apakah ID mengandung kata "MANUAL"
+          let isManual = String(r[0]).includes('MANUAL');
+          
+          let aksiTombol = '';
+          
+          if(isManual) {
+              aksiTombol = `
+              <button class="btn btn-sm btn-warning text-dark py-0 px-2" 
+                  onclick="editKeuangan('${r[0]}', '${r[1]}', '${r[2]}', '${r[3]}', ${r[4]}, '${r[5]}')" title="Edit">
+                  <i class="material-icons" style="font-size:14px">edit</i>
+              </button>
+              <button class="btn btn-sm btn-light text-danger border py-0 px-2 ms-1" onclick="hapusKeuangan('${r[0]}')" title="Hapus">
+                  <i class="material-icons" style="font-size:14px">delete</i>
+              </button>
+              `;
+          } else {
+             // Jika Otomatis: Tampilkan Gembok (Terkunci)
+             aksiTombol = `
+                <span class="badge bg-light text-muted border" title="Data Otomatis (Tidak bisa diedit manual)">
+                   <i class="material-icons align-middle" style="font-size:12px">lock</i> Auto
+                </span>
+             `;
+          }
 
           tb.innerHTML += `
             <tr>
                 <td>${tgl}</td>
-                <td>${r[2]}</td>
+                <td><span class="badge ${r[2] === 'Pemasukan' ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger'}">${r[2]}</span></td>
                 <td>${r[3]}</td>
-                <td>${rupiah(r[4])}</td>
-                <td>${r[5]}</td>
+                <td class="${colorClass} fw-bold">${nominal}</td>
+                <td><small class="text-muted text-truncate d-block" style="max-width: 150px;">${r[5]}</small></td>
+                <td class="text-center">${aksiTombol}</td>
             </tr>`;
       });
 
     }).getData('KEUANGAN');
-  }
-
-// Di file javascript.html
+}
 
 function bukaModalKeuangan() {
-    // 1. [SOLUSI] Reset Form agar kosong lagi
+    // 1. Set Tanggal Hari Ini (Default)
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('keu-tanggal').value = today;
+
+    // Reset Form Lainnya
     document.getElementById('keu-nominal').value = ''; 
     document.getElementById('keu-ket').value = '';
-    
-    // Reset dropdown ke pilihan pertama (Pengeluaran)
     document.getElementById('keu-jenis').selectedIndex = 0; 
-
-    // 2. Refresh kategori (biar kategori baru muncul)
     refreshDropdownKategori(); 
 
-    // 3. Tampilkan Modal
+    // Visual Mode Baru
+    document.getElementById('modalKeuanganTitle').innerText = "Catat Transaksi Baru";
+    document.getElementById('modalKeuanganTitle').className = "fw-bold text-primary"; 
+
+    const btn = document.getElementById('btn-simpan-keuangan');
+    btn.removeAttribute('data-id'); 
+    btn.innerText = "SIMPAN DATA"; 
+    btn.className = "btn btn-primary fw-bold"; 
+
     new bootstrap.Modal(document.getElementById('modalKeuangan')).show();
-    
-    // 4. Auto focus ke kolom nominal biar cepat ngetik
     setTimeout(() => document.getElementById('keu-nominal').focus(), 500);
 }
 
-// --- 2. FUNGSI SIMPAN KEUANGAN (DIPERBAIKI: Ada Alert & Auto Refresh) ---
+function editKeuangan(id, tglRaw, jenis, kategori, nominal, ket) {
+    // Visual Mode Edit
+    document.getElementById('modalKeuanganTitle').innerText = "Edit Data Keuangan";
+    document.getElementById('modalKeuanganTitle').className = "fw-bold text-warning"; 
+
+    const btn = document.getElementById('btn-simpan-keuangan');
+    btn.setAttribute('data-id', id);
+    btn.innerText = "UPDATE PERUBAHAN";
+    btn.className = "btn btn-warning fw-bold text-dark"; 
+
+    // --- ISI DATA LAMA ---
+    
+    // 1. Tanggal (Perlu di-convert ke YYYY-MM-DD untuk input HTML)
+    let dateVal = '';
+    try {
+        if(tglRaw) {
+            dateVal = new Date(tglRaw).toISOString().split('T')[0];
+        }
+    } catch(e) {}
+    document.getElementById('keu-tanggal').value = dateVal;
+
+    // 2. Jenis & Ket
+    document.getElementById('keu-jenis').value = jenis;
+    document.getElementById('keu-ket').value = ket;
+
+    // 3. Nominal (Diformat Ribuan: 100000 -> 100.000)
+    document.getElementById('keu-nominal').value = new Intl.NumberFormat('id-ID').format(nominal);
+
+    // 4. Load Kategori
+    const selectEl = document.getElementById('keu-kategori');
+    selectEl.innerHTML = '<option>Loading...</option>'; 
+
+    google.script.run.withSuccessHandler(categories => {
+        selectEl.innerHTML = ''; 
+        if (categories) categories.forEach(cat => selectEl.innerHTML += `<option value="${cat}">${cat}</option>`);
+        selectEl.value = kategori;
+        if (selectEl.value !== kategori) {
+             const opt = document.createElement('option');
+             opt.value = kategori; opt.innerText = kategori;
+             selectEl.appendChild(opt); selectEl.value = kategori;
+        }
+    }).getKategori();
+
+    new bootstrap.Modal(document.getElementById('modalKeuangan')).show();
+}
+
+// --- FUNGSI BARU: HAPUS ---
+function hapusKeuangan(id) {
+    myConfirm('Hapus Data', 'Yakin hapus data keuangan ini?', () => {
+        loading(true);
+        google.script.run.withSuccessHandler(() => {
+            loading(false);
+            loadKeuangan(); // Refresh tabel
+            loadDashboard(); // Refresh angka dashboard
+            myAlert('Sukses', 'Data berhasil dihapus', 'success');
+        }).hapusKeuangan(id);
+    });
+}
+
 function simpanKeuangan() {
-    // Ambil Data dari Form
+    const btn = document.getElementById('btn-simpan-keuangan');
+    const idEdit = btn.getAttribute('data-id'); 
+    
+    const tgl = document.getElementById('keu-tanggal').value;
     const jenis = document.getElementById('keu-jenis').value;
     const kategori = document.getElementById('keu-kategori').value;
-    const nominal = document.getElementById('keu-nominal').value;
+    
+    // AMBIL NOMINAL & HAPUS TITIK (Agar jadi angka murni)
+    const rawNominal = document.getElementById('keu-nominal').value;
+    const nominal = rawNominal.replace(/\./g, ''); // Hapus titik
+
     const ket = document.getElementById('keu-ket').value;
 
-    // Validasi Sederhana
-    if(!nominal || nominal == 0) return myAlert('Eits!', 'Nominal uang wajib diisi ya.', 'warning');
-    if(!kategori || kategori === 'Belum ada kategori') return myAlert('Info', 'Pilih atau buat kategori dulu.', 'warning');
+    if(!tgl) return myAlert('Eits!', 'Tanggal wajib diisi.', 'warning');
+    if(!nominal || nominal == 0) return myAlert('Eits!', 'Nominal wajib diisi.', 'warning');
+    if(!kategori) return myAlert('Info', 'Pilih kategori dulu.', 'warning');
 
     const dataKirim = { 
+        id: idEdit, 
+        tanggal: tgl, // Kirim Tanggal
         jenis: jenis, 
         kategori: kategori, 
         nominal: nominal, 
         keterangan: ket 
     };
 
-    // Tampilkan Loading
     loading(true);
-
     google.script.run.withSuccessHandler(() => { 
         loading(false);
-        
-        // 1. Tutup Modal
-        const modalEl = document.getElementById('modalKeuangan');
-        const modalInstance = bootstrap.Modal.getInstance(modalEl);
-        if(modalInstance) modalInstance.hide();
-        
-        // 2. Refresh Tabel (Solusi Masalah Data Gak Muncul)
+        bootstrap.Modal.getInstance(document.getElementById('modalKeuangan')).hide();
         loadKeuangan(); 
-
-        // 3. Tampilkan Pesan Sukses (Solusi Masalah Gak Ada Alert)
-        myAlert('Berhasil', 'Data Keuangan berhasil dicatat!', 'success');
-
+        loadDashboard(); 
+        myAlert('Berhasil', 'Data Keuangan berhasil disimpan!', 'success');
     }).simpanKeuangan(dataKirim);
 }
 
@@ -3050,5 +3146,18 @@ function printLaporanPDF(tableId, judulLaporan) {
         win.focus();
         win.print();
     }, 800);
+}
+
+// --- FUNGSI FORMAT RUPIAH SAAT MENGETIK ---
+function formatRupiahInput(input) {
+  // 1. Hapus semua karakter selain angka
+  let value = input.value.replace(/\D/g, ''); 
+  
+  // 2. Format jadi ribuan (Cth: 100000 -> 100.000)
+  if(value !== '') {
+      input.value = new Intl.NumberFormat('id-ID').format(value);
+  } else {
+      input.value = '';
+  }
 }
 </script>
