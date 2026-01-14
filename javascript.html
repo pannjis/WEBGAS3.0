@@ -1197,7 +1197,7 @@ function eksekusiBayarUtama() {
         loading(true);
         google.script.run.withSuccessHandler(res => {
            loading(false);
-           const idTrxSementara = 'TRX-' + Date.now(); 
+           const idTrxSementara = 'KBA-' + Date.now();
            tampilkanInvoice(payload, idTrxSementara);
            document.getElementById('kasir-pelanggan').value = ""; 
            loadProduk(); 
@@ -2247,10 +2247,9 @@ document.getElementById('pos-metode-bayar')?.addEventListener('change', function
     }
 });
 
+// --- 1. FUNGSI LOAD PIUTANG (FIX BUG STATUS) ---
 function loadPiutang() {
    loading(true);
-   console.log("Meminta data piutang..."); // Debug 1
-
    google.script.run
      .withFailureHandler(err => {
          loading(false);
@@ -2258,59 +2257,96 @@ function loadPiutang() {
      })
      .withSuccessHandler(data => {
         loading(false);
-        console.log("Data diterima:", data); // Debug 2: Cek di Console Browser (F12)
-        
         const tb = document.querySelector('#tabel-piutang tbody');
         tb.innerHTML = '';
         
         if(!data || data.length === 0) {
-           tb.innerHTML = '<tr><td colspan="4" class="text-center text-muted p-4">Data Kosong (Backend OK, tapi hasil 0).</td></tr>';
+           tb.innerHTML = '<tr><td colspan="4" class="text-center text-muted p-4">Tidak ada data piutang.</td></tr>';
            return;
         }
 
         data.forEach(row => {
-           // row: [0:ID, 1:WaktuStr, 2:Pelanggan, 3:Total, 4:JatuhTempoStr]
+           // row: [0:ID, 1:WaktuStr, 2:Pelanggan, 3:Total, 4:JatuhTempoStr, 5:Status]
            
-           // Format Tanggal dari String ISO
+           const idTrx = row[0];
+           const namaPel = row[2];
+           const total = row[3];
+           const status = row[5] ? row[5].toString().trim() : ''; 
+           
+           // [PERBAIKAN DISINI] Cek Persis kata 'Lunas' (Case insensitive)
+           const isLunas = status.toLowerCase() === 'lunas'; 
+
+           // Format Tanggal Jatuh Tempo
            let tglTempo = '-';
            let isLate = false;
 
            if(row[4] && row[4].length > 5) {
                let d = new Date(row[4]);
-               tglTempo = d.toLocaleDateString('id-ID'); // Ubah ke format Indo
-               
-               // Cek Telat
-               if(d < new Date()) isLate = true;
+               tglTempo = d.toLocaleDateString('id-ID'); 
+               // Telat jika Belum Lunas DAN Tanggal Lewat
+               if(!isLunas && d < new Date()) isLate = true;
            }
 
            let tglTrx = row[1] ? new Date(row[1]).toLocaleDateString('id-ID') : '-';
            
-           // Styling
-           let tempoStyle = isLate ? 'text-danger fw-bold' : 'text-dark';
-           let badgeLate = isLate ? '<span class="badge bg-danger ms-1" style="font-size:9px">Telat</span>' : '';
+           // Styling Tanggal
+           let tempoDisplay = '';
+           if(isLunas) {
+               tempoDisplay = `<span class="text-success fw-bold"><i class="material-icons align-middle" style="font-size:14px">check_circle</i> Selesai</span>`;
+           } else {
+               let badgeLate = isLate ? '<span class="badge bg-danger ms-1" style="font-size:9px">Telat</span>' : '';
+               let textClass = isLate ? 'text-danger fw-bold' : 'text-dark';
+               tempoDisplay = `<div class="${textClass}">${tglTempo} ${badgeLate}</div>`;
+           }
+
+           // --- LOGIKA TOMBOL AKSI & CETAK ---
+           let buttonsHtml = '';
+           
+           if (isLunas) {
+               // KONDISI LUNAS: Badge + Cetak Bukti Lunas
+               buttonsHtml = `
+                   <span class="badge bg-light text-secondary border border-secondary px-2 py-1 me-1">SUDAH LUNAS</span>
+                   <button class="btn btn-secondary btn-sm rounded-pill px-3 py-1 fw-bold shadow-sm" onclick="cetakSlipPiutang('${idTrx}', '${namaPel}', ${total}, '${tglTempo}', 'LUNAS')" style="font-size:11px">
+                      <i class="material-icons align-middle" style="font-size:12px">print</i> BUKTI LUNAS
+                   </button>
+               `;
+           } else {
+               // KONDISI HUTANG: Tombol Lunasi + Cetak Tagihan
+               buttonsHtml = `
+                   <button class="btn btn-success btn-sm rounded-pill px-2 py-1 fw-bold shadow-sm me-1" onclick="prosesPelunasan('${idTrx}', '${namaPel}', ${total})" style="font-size:11px">
+                      LUNASI
+                   </button>
+                   <button class="btn btn-info text-white btn-sm rounded-pill px-2 py-1 fw-bold shadow-sm" onclick="cetakSlipPiutang('${idTrx}', '${namaPel}', ${total}, '${tglTempo}', 'TAGIHAN')" style="font-size:11px">
+                      <i class="material-icons align-middle" style="font-size:12px">print</i> TAGIHAN
+                   </button>
+               `;
+           }
+
+           // --- WARNA BACKGROUND BARIS ---
+           let bgRow = isLunas ? 'style="background-color: #f8f9fa;"' : '';
+           let opacity = isLunas ? 'style="opacity: 0.8;"' : '';
 
            tb.innerHTML += `
-             <tr>
+             <tr ${bgRow}>
                 <td>
-                   <div class="${tempoStyle}">${tglTempo} ${badgeLate}</div>
+                   ${tempoDisplay}
                    <small class="text-muted d-block" style="font-size:11px">Trx: ${tglTrx}</small>
                 </td>
-                <td>
-                   <span class="fw-bold text-dark">${row[2]}</span><br>
-                   <small class="text-muted text-truncate d-block" style="max-width:150px; font-size:10px">${row[0]}</small>
+                <td ${opacity}>
+                   <span class="fw-bold text-dark">${namaPel}</span><br>
+                   <small class="text-muted text-truncate d-block" style="max-width:150px; font-size:10px">${idTrx}</small>
                 </td>
-                <td class="fw-bold text-danger">${rupiah(row[3])}</td>
-                <td>
-                   <button class="btn btn-success btn-sm rounded-pill px-3 py-1 fw-bold" onclick="prosesPelunasan('${row[0]}', '${row[2]}', ${row[3]})" style="font-size:11px">
-                      LUNAS
-                   </button>
+                <td class="fw-bold ${isLunas ? 'text-decoration-line-through text-muted' : 'text-danger'}" ${opacity}>
+                    ${rupiah(total)}
+                </td>
+                <td class="text-center" style="white-space: nowrap;">
+                   ${buttonsHtml}
                 </td>
              </tr>
            `;
         });
-     }).getDataPiutang();
+     }).getDataPiutang(); 
 }
-
 function prosesPelunasan(id, nama, total) {
     myConfirm('Pelunasan Hutang', `Terima pembayaran sebesar ${rupiah(total)} dari ${nama}?\n\nData akan dicatat ke KEUANGAN (Pemasukan) dan status transaksi menjadi LUNAS.`, () => {
         loading(true);
@@ -2505,6 +2541,160 @@ function tampilkanInvoice(dataPayload, idTrx) {
 
     areaCetak.innerHTML = htmlInvoice + '<div class="page-break"></div>' + htmlSuratJalan;
     new bootstrap.Modal(document.getElementById('modalInvoice')).show();
+}
+
+// --- FUNGSI CETAK SLIP PIUTANG (REVISI TENGAH & RAPI) ---
+function cetakSlipPiutang(idTrx, pelanggan, total, jatuhTempo, mode) {
+    
+    // 1. Ambil Data Perusahaan
+    const namaPT = globalCompanyProfile.nama_perusahaan || 'NAMA PERUSAHAAN';
+    const alamatPT = globalCompanyProfile.alamat || '-';
+    const noPT = globalCompanyProfile.no_perusahaan || '-';
+    const logoUrl = globalCompanyProfile.logo_perusahaan || '';
+    
+    let htmlLogo = '';
+    if (logoUrl) {
+        htmlLogo = `<img src="${logoUrl}" style="height: 65px; width: auto; margin-right: 15px;">`;
+    }
+
+    const tglCetak = new Date().toLocaleString('id-ID');
+
+    // 2. Konten Dinamis
+    let judulDokumen = '';
+    let warnaHeader = '';
+    let pesanBody = '';
+    let labelTotal = '';
+    
+    if (mode === 'LUNAS') {
+        judulDokumen = 'TANDA TERIMA PELUNASAN';
+        warnaHeader = '#198754'; // Hijau
+        labelTotal = 'TOTAL DIBAYARKAN';
+        pesanBody = `
+            <div style="background-color: #d1e7dd; padding: 15px; border-left: 5px solid #198754; margin-bottom: 20px; color: #0f5132;">
+                <strong>TERIMA KASIH.</strong><br>
+                Pembayaran untuk transaksi ini telah kami terima dengan lunas.<br>
+                Bukti ini adalah tanda terima yang sah.
+            </div>`;
+    } else {
+        judulDokumen = 'INVOICE / SURAT TAGIHAN';
+        warnaHeader = '#dc3545'; // Merah
+        labelTotal = 'SISA TAGIHAN';
+        pesanBody = `
+            <div style="background-color: #f8d7da; padding: 15px; border-left: 5px solid #dc3545; margin-bottom: 20px; color: #842029;">
+                <strong>MOHON SEGERA DIBAYAR.</strong><br>
+                Kami informasikan bahwa tagihan ini telah/akan jatuh tempo pada tanggal <b>${jatuhTempo}</b>.<br>
+                Mohon segera melakukan pembayaran.
+            </div>`;
+    }
+
+    // 3. Template HTML
+    const win = window.open('', '', 'height=700,width=900');
+    
+    // PERBAIKAN: CSS Header dibuat Center
+    const htmlContent = `
+    <html>
+    <head>
+        <title>${judulDokumen} - ${pelanggan}</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
+            body { font-family: 'Roboto', sans-serif; padding: 40px; color: #333; -webkit-print-color-adjust: exact; }
+            
+            /* HEADER KOP SURAT (DIPERBAIKI) */
+            .header { 
+                display: flex; 
+                align-items: center; 
+                justify-content: center; /* INI KUNCINYA: Biar di Tengah */
+                border-bottom: 3px double #333; 
+                padding-bottom: 20px; 
+                margin-bottom: 30px; 
+                text-align: center; /* Teks di dalamnya juga tengah */
+            }
+            
+            .judul-besar { font-size: 20px; font-weight: bold; color: ${warnaHeader}; text-transform: uppercase; margin-bottom: 5px; }
+            .box-info { display: flex; justify-content: space-between; margin-bottom: 30px; border-bottom: 1px dashed #ccc; padding-bottom: 20px; }
+            .tabel-detail { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            .tabel-detail th { background: #f2f2f2; text-align: left; padding: 10px; border-bottom: 2px solid #ddd; }
+            .tabel-detail td { padding: 10px; border-bottom: 1px solid #eee; }
+            .total-box { text-align: right; font-size: 18px; font-weight: bold; margin-top: 20px; }
+            .ttd-area { display: flex; justify-content: space-between; margin-top: 60px; text-align: center; }
+            .footer-note { margin-top: 50px; font-size: 10px; color: #777; font-style: italic; border-top: 1px solid #eee; padding-top: 10px; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            ${htmlLogo}
+            <div style="text-align: center;"> <h2 style="margin:0; font-size:24px; color:#d32f2f; text-transform: uppercase; line-height:1.2;">${namaPT}</h2>
+                <div style="font-size:11px; font-weight:bold; margin-top:5px;">${alamatPT}</div>
+                <div style="font-size:11px;">Telp: ${noPT}</div>
+            </div>
+        </div>
+
+        <div style="text-align:center; margin-bottom:30px;">
+            <div class="judul-besar" style="border: 2px solid ${warnaHeader}; display:inline-block; padding: 8px 30px; border-radius: 8px;">
+                ${judulDokumen}
+            </div>
+            <div style="margin-top:5px; color:#555; font-size:12px;">Dicetak pada: ${tglCetak}</div>
+        </div>
+
+        <div class="box-info">
+            <div style="width: 48%;">
+                <small style="color:#777; font-weight:bold; letter-spacing:1px;">KEPADA YTH:</small><br>
+                <span style="font-size:18px; font-weight:bold; color:#000;">${pelanggan}</span>
+            </div>
+            <div style="width: 48%; text-align:right;">
+                <small style="color:#777; font-weight:bold; letter-spacing:1px;">NO. REFERENSI:</small><br>
+                <span style="font-size:16px; font-weight:bold;">${idTrx}</span>
+            </div>
+        </div>
+
+        ${pesanBody}
+
+        <table class="tabel-detail">
+            <thead>
+                <tr>
+                    <th>Keterangan Transaksi</th>
+                    <th style="text-align:right;">Nominal Tagihan</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Tagihan Pembelian Barang (ID: <b>${idTrx}</b>)</td>
+                    <td style="text-align:right;">${rupiah(total)}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="total-box">
+            ${labelTotal}: <span style="font-size:26px; color:${warnaHeader}; margin-left:10px;">${rupiah(total)}</span>
+        </div>
+
+        <div class="ttd-area">
+            <div style="width: 200px;">
+                <small>Penerima,</small>
+                <br><br><br><br>
+                <div style="border-bottom: 1px solid #000; font-weight:bold;">(${pelanggan})</div>
+            </div>
+            <div style="width: 200px;">
+                <small>Hormat Kami,</small>
+                <br><br><br><br>
+                <div style="border-bottom: 1px solid #000; font-weight:bold;">( Admin Keuangan )</div>
+            </div>
+        </div>
+
+        <div class="footer-note">
+            Dokumen ini dicetak secara otomatis oleh sistem SiGAS PRO. <br>
+            Harap simpan bukti ini sebagai referensi transaksi yang sah.
+        </div>
+
+        <script>
+            setTimeout(() => { window.print(); }, 800);
+        <\/script>
+    </body>
+    </html>
+    `;
+    
+    win.document.write(htmlContent);
+    win.document.close();
 }
 
 function tutupInvoice() {
