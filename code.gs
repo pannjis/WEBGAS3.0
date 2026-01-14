@@ -201,11 +201,23 @@ function simpanProfilPerusahaan(form) {
   return "Profil & Logo Berhasil Disimpan!";
 }
 
-// --- HELPER DATA ---
+// --- HELPER DATA (UPDATE) ---
 function getData(sheetName) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   if (!sheet) return [];
-  return sheet.getDataRange().getValues().slice(1);
+  
+  const data = sheet.getDataRange().getValues().slice(1); // Hapus Header
+  
+  // FILTER & FORMATTING
+  // 1. Hapus baris yang kolom pertamanya (ID) kosong
+  // 2. Ubah format Tanggal (Kolom Index 1) menjadi String agar tidak error di browser
+  return data.filter(r => r[0] !== "").map(r => {
+      // Cek apakah kolom ke-2 (Index 1) adalah Tanggal
+      if (r[1] instanceof Date) {
+         r[1] = r[1].toISOString(); 
+      }
+      return r;
+  });
 }
 
 // --- LOGIN ---
@@ -886,30 +898,65 @@ function tambahKategori(nama) {
   SpreadsheetApp.getActiveSpreadsheet().getSheetByName('KATEGORI').appendRow([nama]);
 }
 
-// Di file code.gs
-
 function simpanKeuangan(form) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('KEUANGAN');
   
-  // PENGAMAN: Jika header terhapus, buat lagi biar data tidak error
   if (sheet.getLastRow() === 0) {
      sheet.appendRow(['ID', 'Tanggal', 'Jenis', 'Kategori', 'Nominal', 'Keterangan']);
   }
 
-  // Simpan Data Baru
+  // Parse Tanggal dari Form (YYYY-MM-DD)
+  // Kita pakai new Date(form.tanggal) agar dikenali sheet sebagai objek tanggal
+  const tglInput = new Date(form.tanggal); 
+
+  // --- LOGIKA EDIT ---
+  if (form.id && form.id !== 'null' && form.id !== '') {
+      const data = sheet.getDataRange().getValues();
+      for(let i = 1; i < data.length; i++) {
+          if(data[i][0] == form.id) { 
+              // UPDATE KOLOM 2 (TANGGAL) JUGA
+              sheet.getRange(i+1, 2).setValue(tglInput); // Update Tanggal
+              sheet.getRange(i+1, 3).setValue(form.jenis);
+              sheet.getRange(i+1, 4).setValue(form.kategori);
+              sheet.getRange(i+1, 5).setValue(form.nominal);
+              sheet.getRange(i+1, 6).setValue(form.keterangan);
+              return "Data Berhasil Diupdate";
+          }
+      }
+  }
+
+  // --- LOGIKA BARU ---
+  const newId = 'MANUAL-' + Date.now();
   sheet.appendRow([
-      'MANUAL-' + Date.now(), 
-      new Date(), 
+      newId, 
+      tglInput, // Pakai tanggal inputan user, bukan new Date() hari ini
       form.jenis, 
       form.kategori, 
       form.nominal, 
       form.keterangan
   ]);
   
-  // [SOLUSI UTAMA] Paksa simpan perubahan agar saat di-load data sudah ada
   SpreadsheetApp.flush(); 
-  
   return "Sukses";
+}
+
+// --- BARU: HAPUS KEUANGAN ---
+function hapusKeuangan(id) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('KEUANGAN');
+  const data = sheet.getDataRange().getValues();
+  
+  // Safety: Cek lagi di server, hanya boleh hapus yang MANUAL
+  if(!String(id).includes('MANUAL')) {
+     throw new Error("Data sistem (Otomatis) tidak boleh dihapus dari sini!");
+  }
+
+  for(let i = 1; i < data.length; i++) {
+    if(data[i][0] == id) {
+       sheet.deleteRow(i+1);
+       return "Data Dihapus";
+    }
+  }
+  throw new Error("ID tidak ditemukan");
 }
 
 // --- SDM: KARYAWAN ---
