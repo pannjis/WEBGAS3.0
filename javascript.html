@@ -3,6 +3,7 @@
   let globalCompanyProfile = {};
   let globalListPelanggan = [];
   let globalListSupplier = [];
+  let globalKeuanganData = [];
   let payrollDataTemp = [];
   let keranjangBelanja = [];
   let globalRiwayatData = [];
@@ -1645,6 +1646,17 @@ function initTanggal() {
     flatpickr("input[type=date]:not(.flatpickr-input)", {
         ...baseConfig
     });
+
+        // Di dalam initTanggal()
+    flatpickr("#filter-jual-start, #filter-beli-start, #filter-keu-start", { // <--- Tambah #filter-keu-start
+        ...baseConfig,
+        defaultDate: today
+    });
+
+    flatpickr("#filter-jual-end, #filter-beli-end, #filter-keu-end", { // <--- Tambah #filter-keu-end
+        ...baseConfig,
+        defaultDate: today
+    });
 }
 // [UPDATE] Fungsi Auto Date agar support Flatpickr & Tampilan Langsung Muncul
 function setAutoDate(tipe) {
@@ -2117,77 +2129,142 @@ function loadPelangganDropdown(targetNama = null) {
     }).getListPelanggan();
 }
 
-// --- LOAD KEUANGAN DENGAN PROTEKSI ---
+// 1. FUNGSI FETCH DATA DARI SERVER
 function loadKeuangan() {
+    loading(true);
     google.script.run.withSuccessHandler(d => {
-      
-      const tb = document.querySelector('#tabel-keuangan tbody'); 
-      tb.innerHTML='';
+        loading(false);
+        
+        // Simpan ke variabel global agar bisa difilter
+        globalKeuanganData = d || []; 
 
-      if (!d || d.length === 0) {
-          tb.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Belum ada data keuangan.</td></tr>';
-          return; 
-      }
-
-      // Render Data (Maks 20 Baris Terakhir)
-      d.reverse().slice(0, 20).forEach(r => {
-          // r[0]: ID, r[1]: Tanggal, r[2]: Jenis, r[3]: Kategori, r[4]: Nominal, r[5]: Ket
-          
-          let tgl = '-';
-          try { 
-              if(r[1]) {
-                  tgl = new Date(r[1]).toLocaleDateString('id-ID', {
-                      day: 'numeric', month: 'short', year: 'numeric'
-                  });
-              }
-          } catch(e){ console.log(e); }
-
-          let colorClass = r[2] === 'Pemasukan' ? 'text-success' : 'text-danger';
-          let nominal = rupiah(r[4]);
-
-          // --- LOGIKA PROTEKSI ---
-          // Cek apakah ID mengandung kata "MANUAL"
-          let isManual = String(r[0]).includes('MANUAL');
-          
-          let aksiTombol = '';
-          
-          if(isManual) {
-              aksiTombol = `
-              <button class="btn btn-sm btn-warning text-dark py-0 px-2" 
-                  onclick="editKeuangan('${r[0]}', '${r[1]}', '${r[2]}', '${r[3]}', ${r[4]}, '${r[5]}')" title="Edit">
-                  <i class="material-icons" style="font-size:14px">edit</i>
-              </button>
-              <button class="btn btn-sm btn-light text-danger border py-0 px-2 ms-1" onclick="hapusKeuangan('${r[0]}')" title="Hapus">
-                  <i class="material-icons" style="font-size:14px">delete</i>
-              </button>
-              `;
-          } else {
-             // Jika Otomatis: Tampilkan Gembok (Terkunci)
-             aksiTombol = `
-                <span class="badge bg-light text-muted border" title="Data Otomatis (Tidak bisa diedit manual)">
-                   <i class="material-icons align-middle" style="font-size:12px">lock</i> Auto
-                </span>
-             `;
-          }
-
-          tb.innerHTML += `
-            <tr>
-                <td>${tgl}</td>
-                <td><span class="badge ${r[2] === 'Pemasukan' ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger'}">${r[2]}</span></td>
-                <td>${r[3]}</td>
-                <td class="${colorClass} fw-bold">${nominal}</td>
-                <td><small class="text-muted text-truncate d-block" style="max-width: 150px;">${r[5]}</small></td>
-                <td class="text-center">${aksiTombol}</td>
-            </tr>`;
-      });
+        // Render tabel dengan data mentah (semua data)
+        renderTabelKeuangan(globalKeuanganData);
 
     }).getData('KEUANGAN');
 }
 
+// 2. FUNGSI RENDER TABEL (Menerima Data Array)
+function renderTabelKeuangan(data) {
+    const tb = document.querySelector('#tabel-keuangan tbody'); 
+    tb.innerHTML = '';
+
+    if (!data || data.length === 0) {
+        tb.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Belum ada data keuangan.</td></tr>';
+        return; 
+    }
+
+    // Kita render data yang diterima (bisa data full, bisa data hasil filter)
+    // Gunakan slice(0, 50) jika ingin membatasi tampilan agar tidak berat (opsional)
+    data.slice(0, 100).forEach(r => {
+        // r[0]: ID, r[1]: Tanggal, r[2]: Jenis, r[3]: Kategori, r[4]: Nominal, r[5]: Ket
+        
+        // Format Tanggal: 14/01/2026
+        let tglDisplay = '-';
+        let timestamp = 0; // Untuk sorting/filter teknis
+        
+        try { 
+            if(r[1]) {
+                let d = new Date(r[1]);
+                timestamp = d.getTime(); // Simpan timestamp untuk filter
+                let dd = String(d.getDate()).padStart(2, '0');
+                let mm = String(d.getMonth() + 1).padStart(2, '0');
+                let yyyy = d.getFullYear();
+                tglDisplay = `${dd}/${mm}/${yyyy}`;
+            }
+        } catch(e){ console.log(e); }
+
+        let colorClass = r[2] === 'Pemasukan' ? 'text-success' : 'text-danger';
+        let nominal = rupiah(r[4]);
+
+        // Cek ID Manual vs Auto
+        let isManual = String(r[0]).includes('MANUAL');
+        let aksiTombol = '';
+        
+        if(isManual) {
+            aksiTombol = `
+            <button class="btn btn-sm btn-warning text-dark py-0 px-2" 
+                onclick="editKeuangan('${r[0]}', '${r[1]}', '${r[2]}', '${r[3]}', ${r[4]}, '${r[5]}')" title="Edit">
+                <i class="material-icons" style="font-size:14px">edit</i>
+            </button>
+            <button class="btn btn-sm btn-light text-danger border py-0 px-2 ms-1" onclick="hapusKeuangan('${r[0]}')" title="Hapus">
+                <i class="material-icons" style="font-size:14px">delete</i>
+            </button>
+            `;
+        } else {
+            aksiTombol = `
+            <span class="badge bg-light text-muted border" title="Data Otomatis">
+                <i class="material-icons align-middle" style="font-size:12px">lock</i> Auto
+            </span>
+            `;
+        }
+
+        // Kita tambahkan data-ts (timestamp) di TR untuk keperluan debug/sorting lanjutan jika perlu
+        tb.innerHTML += `
+        <tr data-ts="${timestamp}">
+            <td>${tglDisplay}</td>
+            <td><span class="badge ${r[2] === 'Pemasukan' ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger'}">${r[2]}</span></td>
+            <td>${r[3]}</td>
+            <td class="${colorClass} fw-bold">${nominal}</td>
+            <td><small class="text-muted text-truncate d-block" style="max-width: 150px;">${r[5]}</small></td>
+            <td class="text-center">${aksiTombol}</td>
+        </tr>`;
+    });
+}
+
+// 3. FUNGSI FILTER KEUANGAN
+function terapkanFilterKeuangan() {
+    const keyword = document.getElementById('filter-keu-text').value.toLowerCase();
+    const startDateVal = document.getElementById('filter-keu-start').value;
+    const endDateVal = document.getElementById('filter-keu-end').value;
+
+    // Konversi tanggal filter ke Timestamp
+    let startTs = startDateVal ? new Date(startDateVal).setHours(0,0,0,0) : 0;
+    let endTs = endDateVal ? new Date(endDateVal).setHours(23,59,59,999) : 9999999999999; 
+
+    // Filter Array Global
+    const hasilFilter = globalKeuanganData.filter(r => {
+        // Ambil data baris
+        let strData = (r[2] + " " + r[3] + " " + r[5]).toLowerCase(); // Gabung Jenis, Kategori, Ket
+        let rowDate = new Date(r[1]);
+        let rowTs = rowDate.getTime();
+
+        // Cek Logika
+        const matchText = strData.includes(keyword);
+        const matchDate = rowTs >= startTs && rowTs <= endTs;
+
+        return matchText && matchDate;
+    });
+
+    // Render ulang dengan data hasil filter
+    renderTabelKeuangan(hasilFilter);
+}
+
+// Event Listener agar tekan Enter langsung filter
+document.getElementById('filter-keu-text')?.addEventListener('keyup', function(e) {
+    if(e.key === 'Enter') terapkanFilterKeuangan();
+});
+
 function bukaModalKeuangan() {
-    // 1. Set Tanggal Hari Ini (Default)
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('keu-tanggal').value = today;
+    // --- UPDATE PERBAIKAN TANGGAL DISINI ---
+    
+    // 1. Ambil Elemen & Tanggal Hari Ini
+    const elTanggal = document.getElementById('keu-tanggal');
+    const today = new Date();
+
+    // 2. Cek apakah elemen ini dikontrol oleh Flatpickr?
+    if (elTanggal._flatpickr) {
+        // Jika YA: Gunakan fungsi setDate bawaan Flatpickr (parameter 'true' agar tampilan refresh)
+        elTanggal._flatpickr.setDate(today, true);
+    } else {
+        // Jika TIDAK (Fallback): Gunakan cara manual HTML biasa (YYYY-MM-DD)
+        // Kita gunakan toLocaleDateString agar sesuai zona waktu lokal (WIB), bukan UTC
+        const offset = today.getTimezoneOffset() * 60000;
+        const localISOTime = (new Date(today - offset)).toISOString().slice(0, 10);
+        elTanggal.value = localISOTime;
+    }
+
+    // --- BATAS UPDATE (Kode di bawah ini biarkan tetap sama) ---
 
     // Reset Form Lainnya
     document.getElementById('keu-nominal').value = ''; 
@@ -2220,14 +2297,23 @@ function editKeuangan(id, tglRaw, jenis, kategori, nominal, ket) {
 
     // --- ISI DATA LAMA ---
     
-    // 1. Tanggal (Perlu di-convert ke YYYY-MM-DD untuk input HTML)
-    let dateVal = '';
-    try {
-        if(tglRaw) {
-            dateVal = new Date(tglRaw).toISOString().split('T')[0];
-        }
-    } catch(e) {}
-    document.getElementById('keu-tanggal').value = dateVal;
+    // 1. UPDATE TANGGAL (FIX BUG KOSONG)
+    const elTanggal = document.getElementById('keu-tanggal');
+    
+    // Cek apakah Flatpickr aktif di elemen ini?
+    if (elTanggal._flatpickr) {
+        // Jika YA: Gunakan setDate bawaan Flatpickr agar UI berubah
+        elTanggal._flatpickr.setDate(tglRaw, true);
+    } else {
+        // Jika TIDAK: Fallback manual HTML biasa
+        let dateVal = '';
+        try {
+            if(tglRaw) {
+                dateVal = new Date(tglRaw).toISOString().split('T')[0];
+            }
+        } catch(e) {}
+        elTanggal.value = dateVal;
+    }
 
     // 2. Jenis & Ket
     document.getElementById('keu-jenis').value = jenis;
@@ -2244,6 +2330,7 @@ function editKeuangan(id, tglRaw, jenis, kategori, nominal, ket) {
         selectEl.innerHTML = ''; 
         if (categories) categories.forEach(cat => selectEl.innerHTML += `<option value="${cat}">${cat}</option>`);
         selectEl.value = kategori;
+        // Jaga-jaga jika kategori lama sudah dihapus dari master, tetap tampilkan
         if (selectEl.value !== kategori) {
              const opt = document.createElement('option');
              opt.value = kategori; opt.innerText = kategori;
@@ -2274,11 +2361,8 @@ function simpanKeuangan() {
     const tgl = document.getElementById('keu-tanggal').value;
     const jenis = document.getElementById('keu-jenis').value;
     const kategori = document.getElementById('keu-kategori').value;
-    
-    // AMBIL NOMINAL & HAPUS TITIK (Agar jadi angka murni)
     const rawNominal = document.getElementById('keu-nominal').value;
-    const nominal = rawNominal.replace(/\./g, ''); // Hapus titik
-
+    const nominal = rawNominal.replace(/\./g, ''); 
     const ket = document.getElementById('keu-ket').value;
 
     if(!tgl) return myAlert('Eits!', 'Tanggal wajib diisi.', 'warning');
@@ -2287,7 +2371,7 @@ function simpanKeuangan() {
 
     const dataKirim = { 
         id: idEdit, 
-        tanggal: tgl, // Kirim Tanggal
+        tanggal: tgl, 
         jenis: jenis, 
         kategori: kategori, 
         nominal: nominal, 
@@ -2295,15 +2379,26 @@ function simpanKeuangan() {
     };
 
     loading(true);
-    google.script.run.withSuccessHandler(() => { 
+    google.script.run.withSuccessHandler(res => { 
         loading(false);
+        
+        // Tutup Modal Input
         bootstrap.Modal.getInstance(document.getElementById('modalKeuangan')).hide();
+        
+        // Refresh Tabel & Dashboard
         loadKeuangan(); 
         loadDashboard(); 
-        myAlert('Berhasil', 'Data Keuangan berhasil disimpan!', 'success');
+
+        // --- KONFIRMASI CETAK NOTA ---
+        if(res.status === 'success') {
+            // Tampilkan Confirm khusus print
+            myConfirm('Berhasil Disimpan', 'Apakah Anda ingin mencetak Nota Bukti Transaksi ini?', () => {
+                cetakNotaKeuangan(res.data); // Panggil fungsi cetak
+            });
+        }
+
     }).simpanKeuangan(dataKirim);
 }
-
 // 2. Fungsi Refresh Dropdown (Dipisahkan agar bisa dipanggil ulang)
 function refreshDropdownKategori() {
     const selectEl = document.getElementById('keu-kategori');
@@ -2751,9 +2846,7 @@ function tutupInvoice() {
     resetKeranjang(); 
 }
 
-// --- FITUR FILTER CEPAT & EXPORT ---
-
-// [UPDATE REVISI] Logika Filter Cepat (Fix Reset Default)
+// --- UPDATE FUNGSI FILTER CEPAT ---
 function setFilterCepat(pilihan, tipe) {
     
     // 1. Setup Awal (Default: Hari Ini)
@@ -2769,13 +2862,11 @@ function setFilterCepat(pilihan, tipe) {
         return `${y}-${m}-${day}`;
     };
 
-    // 2. Logika Pilihan
-    // Jika Pilihan Kosong ("") ATAU "bulan_ini", kembalikan ke Default (Tgl 1 s/d Hari Ini)
+    // 2. Logika Pilihan Waktu
     if (pilihan === "" || pilihan === "bulan_ini") {
         start = new Date(now.getFullYear(), now.getMonth(), 1); // Tgl 1 Bulan Ini
         end = now; // Hari Ini
     } else {
-        // Pilihan Lainnya
         switch(pilihan) {
             case 'hari_ini':
                 // Tidak perlu diubah, start & end sudah default 'now'
@@ -2797,23 +2888,42 @@ function setFilterCepat(pilihan, tipe) {
         }
     }
 
-    // 3. Eksekusi Update ke Input (Flatpickr)
-    const idStart = (tipe === 'JUAL') ? 'filter-jual-start' : 'filter-beli-start';
-    const idEnd = (tipe === 'JUAL') ? 'filter-jual-end' : 'filter-beli-end';
+    // 3. Tentukan ID Input berdasarkan Tipe (JUAL / BELI / KEUANGAN)
+    let idStart, idEnd;
 
+    if (tipe === 'JUAL') {
+        idStart = 'filter-jual-start'; 
+        idEnd = 'filter-jual-end';
+    } else if (tipe === 'BELI') {
+        idStart = 'filter-beli-start'; 
+        idEnd = 'filter-beli-end';
+    } else if (tipe === 'KEUANGAN') { // <--- INI BAGIAN PENTING YANG KURANG
+        idStart = 'filter-keu-start'; 
+        idEnd = 'filter-keu-end';
+    } else {
+        return; // Jika tipe tidak dikenali, berhenti
+    }
+
+    // 4. Eksekusi Update ke Input
     const elStart = document.getElementById(idStart);
     const elEnd = document.getElementById(idEnd);
 
-    if (elStart && elStart._flatpickr) {
-        elStart._flatpickr.setDate(fmt(start), true);
+    // Update Start Date
+    if (elStart) {
+        if (elStart._flatpickr) elStart._flatpickr.setDate(fmt(start), true);
+        else elStart.value = fmt(start);
     }
 
-    if (elEnd && elEnd._flatpickr) {
-        elEnd._flatpickr.setDate(fmt(end), true);
+    // Update End Date
+    if (elEnd) {
+        if (elEnd._flatpickr) elEnd._flatpickr.setDate(fmt(end), true);
+        else elEnd.value = fmt(end);
     }
 
-    // 4. Jalankan Filter Tabel Otomatis
-    terapkanFilter(tipe);
+    // 5. Jalankan Filter Tabel Otomatis
+    if(tipe === 'JUAL') terapkanFilter('JUAL');
+    else if(tipe === 'BELI') terapkanFilter('BELI');
+    else if(tipe === 'KEUANGAN') terapkanFilterKeuangan(); // <--- Refresh Tabel Keuangan
 }
 
 // 2. Export ke Excel (Format .xls HTML Table)
@@ -3146,6 +3256,143 @@ function printLaporanPDF(tableId, judulLaporan) {
         win.focus();
         win.print();
     }, 800);
+}
+
+// --- FUNGSI CETAK NOTA KEUANGAN (KAS MASUK / KELUAR) ---
+function cetakNotaKeuangan(data) {
+    // 1. Ambil Profil Perusahaan
+    const namaPT = globalCompanyProfile.nama_perusahaan || 'NAMA PERUSAHAAN';
+    const alamatPT = globalCompanyProfile.alamat || '-';
+    const noPT = globalCompanyProfile.no_perusahaan || '-';
+    const logoUrl = globalCompanyProfile.logo_perusahaan || '';
+    
+    let htmlLogo = '';
+    if (logoUrl) {
+        htmlLogo = `<img src="${logoUrl}" style="height: 60px; width: auto; margin-right: 15px;">`;
+    }
+
+    // 2. Tentukan Judul & Warna
+    let judulDokumen = '';
+    let warnaHeader = '';
+    let labelTerima = '';
+
+    if (data.jenis === 'Pemasukan') {
+        judulDokumen = 'BUKTI KAS MASUK';
+        warnaHeader = '#198754'; // Hijau
+        labelTerima = 'Diterima Dari';
+    } else {
+        judulDokumen = 'BUKTI KAS KELUAR';
+        warnaHeader = '#dc3545'; // Merah
+        labelTerima = 'Dibayarkan Kepada';
+    }
+
+    // Format Tanggal
+    let tglStr = new Date(data.tanggal).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    // 3. Template HTML Nota
+    const win = window.open('', '', 'height=600,width=800');
+    
+    const htmlContent = `
+    <html>
+    <head>
+        <title>Cetak Nota - ${data.id}</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
+            body { font-family: 'Roboto', sans-serif; padding: 20px; color: #333; -webkit-print-color-adjust: exact; }
+            
+            .container { border: 1px solid #ccc; padding: 30px; max-width: 700px; margin: 0 auto; position: relative; }
+            
+            .header { display: flex; align-items: center; border-bottom: 2px solid #333; padding-bottom: 15px; margin-bottom: 25px; }
+            .header-text h2 { margin: 0; font-size: 20px; color: #333; text-transform: uppercase; }
+            .header-text p { margin: 2px 0 0; font-size: 11px; color: #555; }
+            
+            .judul-nota { 
+                text-align: center; font-size: 18px; font-weight: bold; 
+                background-color: ${warnaHeader}; color: white; 
+                padding: 8px; margin-bottom: 20px; border-radius: 4px; letter-spacing: 1px;
+            }
+
+            .info-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+            .info-table td { padding: 8px 5px; vertical-align: top; font-size: 14px; }
+            .label { font-weight: bold; width: 140px; color: #555; }
+            .separator { width: 10px; }
+            .isi { border-bottom: 1px dotted #ccc; font-weight: 500; }
+            
+            .nominal-box { 
+                background: #f8f9fa; border: 2px dashed ${warnaHeader}; 
+                padding: 10px 20px; font-size: 24px; font-weight: bold; 
+                color: ${warnaHeader}; display: inline-block; margin-top: 10px;
+                border-radius: 8px;
+            }
+
+            .footer { display: flex; justify-content: space-between; margin-top: 50px; text-align: center; }
+            .ttd-box { width: 200px; }
+            .ttd-line { border-bottom: 1px solid #000; margin-top: 60px; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                ${htmlLogo}
+                <div class="header-text">
+                    <h2>${namaPT}</h2>
+                    <p>${alamatPT}</p>
+                    <p>Telp: ${noPT}</p>
+                </div>
+            </div>
+
+            <div class="judul-nota">${judulDokumen}</div>
+
+            <table class="info-table">
+                <tr>
+                    <td class="label">Nomor Transaksi</td><td class="separator">:</td>
+                    <td class="isi">${data.id}</td>
+                </tr>
+                <tr>
+                    <td class="label">Tanggal</td><td class="separator">:</td>
+                    <td class="isi">${tglStr}</td>
+                </tr>
+                <tr>
+                    <td class="label">Kategori</td><td class="separator">:</td>
+                    <td class="isi">${data.kategori}</td>
+                </tr>
+                <tr>
+                    <td class="label">Keterangan</td><td class="separator">:</td>
+                    <td class="isi" style="font-style: italic;">"${data.ket}"</td>
+                </tr>
+                <tr>
+                    <td class="label">Jumlah Uang</td><td class="separator">:</td>
+                    <td>
+                        <div class="nominal-box">${rupiah(data.nominal)}</div>
+                    </td>
+                </tr>
+            </table>
+
+            <div class="footer">
+                <div class="ttd-box">
+                    <small>Disetujui Oleh,</small>
+                    <div class="ttd-line">( Pimpinan / Owner )</div>
+                </div>
+                <div class="ttd-box">
+                    <small>Dibuat Oleh,</small>
+                    <div class="ttd-line">( Admin Keuangan )</div>
+                </div>
+            </div>
+            
+            <div style="font-size: 9px; color: #999; margin-top: 20px; text-align: center;">
+                Dicetak otomatis oleh Sistem SiGAS PRO pada ${new Date().toLocaleString('id-ID')}
+            </div>
+        </div>
+
+        <script>
+            setTimeout(() => { window.print(); }, 800);
+        ` + '</sc' + 'ript>' + `
+    </body>
+    </html>
+    `;
+    
+    win.document.write(htmlContent);
+    win.document.close();
 }
 
 // --- FUNGSI FORMAT RUPIAH SAAT MENGETIK ---
