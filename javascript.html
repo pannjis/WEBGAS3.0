@@ -342,36 +342,87 @@ function switchSettingTab(tab, btn) {
    if(tab === 'users') loadUsers();
 }
 
-// 2. LOGIKA PROFIL PERUSAHAAN
+// 1. FUNGSI PREVIEW LOGO (Baru)
+function previewLogo(input) {
+    const preview = document.getElementById('img-preview-logo');
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            preview.src = e.target.result;
+            preview.classList.remove('d-none');
+        }
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+
+// 2. UPDATE FUNGSI LOAD (Agar menampilkan logo yang sudah tersimpan)
+// Ganti fungsi loadCompanyProfile() yang lama dengan ini:
 function loadCompanyProfile() {
    google.script.run.withSuccessHandler(config => {
-      globalCompanyProfile = config; // Simpan ke global untuk Invoice
+      globalCompanyProfile = config; 
       
-      // Isi Form
       document.getElementById('set-comp-nama').value = config.nama_perusahaan || '';
       document.getElementById('set-comp-owner').value = config.nama_pemilik || '';
       document.getElementById('set-comp-alamat').value = config.alamat || '';
       document.getElementById('set-comp-no-pt').value = config.no_perusahaan || '';
       document.getElementById('set-comp-no-owner').value = config.no_pemilik || '';
-      
+
+      // Tampilkan Logo jika ada
+      const imgPrev = document.getElementById('img-preview-logo');
+      if(config.logo_perusahaan) {
+          imgPrev.src = config.logo_perusahaan;
+          imgPrev.classList.remove('d-none');
+      }
+
    }).getProfilPerusahaan();
 }
 
+// 3. UPDATE FUNGSI SIMPAN (Agar mengirim file gambar ke backend)
+// Ganti fungsi simpanProfilPerusahaanJS() yang lama dengan ini:
 function simpanProfilPerusahaanJS() {
+   const fileInput = document.getElementById('set-comp-logo');
+   const file = fileInput.files[0];
+
    const payload = {
       nama_perusahaan: document.getElementById('set-comp-nama').value,
       nama_pemilik: document.getElementById('set-comp-owner').value,
       alamat: document.getElementById('set-comp-alamat').value,
       no_perusahaan: document.getElementById('set-comp-no-pt').value,
-      no_pemilik: document.getElementById('set-comp-no-owner').value
+      no_pemilik: document.getElementById('set-comp-no-owner').value,
+      logo: null // Default null
    };
    
-   loading(true);
-   google.script.run.withSuccessHandler(res => {
-      loading(false);
-      globalCompanyProfile = payload; // Update variable global langsung
-      myAlert('Sukses', res, 'success');
-   }).simpanProfilPerusahaan(payload);
+   // Fungsi Kirim Data (Sub-function agar rapi)
+   const kirim = (data) => {
+       loading(true);
+       google.script.run.withSuccessHandler(res => {
+          loading(false);
+          // Update global profile agar Invoice langsung berubah tanpa refresh
+          globalCompanyProfile = data; 
+          // Jika ada logo baru di response (biasanya URL), update juga (tapi disini kita reload aja biar aman)
+          loadCompanyProfile(); 
+          
+          myAlert('Sukses', res, 'success');
+       }).simpanProfilPerusahaan(data);
+   };
+
+   // Cek apakah ada file logo yang dipilih?
+   if (file) {
+       // Validasi Ukuran (Maks 2MB)
+       if(file.size > 2 * 1024 * 1024) return myAlert('File Besar', 'Maksimal ukuran logo 2MB', 'warning');
+
+       const reader = new FileReader();
+       reader.onload = function(e) {
+           payload.logo = {
+               data: e.target.result.split(',')[1], // Ambil base64
+               mimeType: file.type
+           };
+           kirim(payload); // Kirim dengan logo
+       };
+       reader.readAsDataURL(file);
+   } else {
+       kirim(payload); // Kirim tanpa update logo (data teks saja)
+   }
 }
 
 // 3. LOGIKA MANAJEMEN USER
@@ -429,6 +480,8 @@ function editUser(username, nama, role) {
    new bootstrap.Modal(document.getElementById('modalUser')).show();
 }
 
+// Cari fungsi ini di javascript.html dan GANTI isinya:
+
 function simpanUserDB() {
    const isEdit = document.getElementById('user-is-edit').value === 'true';
    const username = document.getElementById('user-username').value.trim();
@@ -443,8 +496,8 @@ function simpanUserDB() {
       isEdit: isEdit,
       username: username,
       nama: nama,
-      password: pass, // Bisa kosong kalau edit
-      role: isAdmin ? 'Admin' : 'User' // Konversi Checkbox ke String Role
+      password: pass, 
+      role: isAdmin ? 'Admin' : 'User' 
    };
    
    loading(true);
@@ -456,6 +509,18 @@ function simpanUserDB() {
          myAlert('Sukses', res, 'success');
          bootstrap.Modal.getInstance(document.getElementById('modalUser')).hide();
          loadUsers();
+
+         // --- [TAMBAHAN BARU] ---
+         // Jika user yang diedit adalah user yang sedang login, update tampilan langsung
+         if (currentUser.username === username) {
+             currentUser.nama = nama; // Update memori
+             currentUser.role = payload.role;
+             
+             // Update Teks di Pojok Kanan Atas
+             const displayUser = document.getElementById('display-user');
+             if(displayUser) displayUser.innerText = nama;
+         }
+         // -----------------------
       }
    }).simpanUserBaru(payload);
 }
@@ -496,6 +561,8 @@ function prosesGantiPassword() {
       }
    }).gantiPasswordSendiri(currentUser.username, oldP, newP);
 }
+
+
   // --- DASHBOARD ---
   function loadDashboard() {
     loading(true);
@@ -1408,39 +1475,87 @@ document.getElementById('filter-beli-text')?.addEventListener('keyup', function(
     else terapkanFilter('BELI'); // Live search saat mengetik
 });
 
-// 4. VIEW DETAIL & TOMBOL RETUR
+// GANTI FUNGSI viewDetailTrx DENGAN INI
+
 function viewDetailTrx(tipe, index) {
+   // 1. Ambil Data
    const data = tipe === 'JUAL' ? dataJualTemp : dataBeliTemp;
    const trx = data[index];
    
-   // Isi Modal Detail (Reuse modal yang sudah ada)
+   if(!trx) return myAlert('Error', 'Data transaksi tidak ditemukan', 'error');
+
+   // 2. Isi Modal
    document.getElementById('det-id').innerText = trx.id;
    document.getElementById('det-pelanggan').innerText = trx.pelanggan;
-   document.getElementById('det-waktu').innerText = new Date(trx.waktu).toLocaleString();
+   
+   // Handle Tanggal agar tidak error
+   try {
+       document.getElementById('det-waktu').innerText = new Date(trx.waktu).toLocaleString('id-ID');
+   } catch(e) {
+       document.getElementById('det-waktu').innerText = '-';
+   }
+
    document.getElementById('det-total').innerText = rupiah(trx.totalBayar);
    
+   // 3. Render Tabel Barang
    const tb = document.querySelector('#tabel-detail-trx tbody');
    tb.innerHTML = '';
    trx.items.forEach(item => {
-       tb.innerHTML += `<tr><td>${item.produk}</td><td class="text-center">${item.qty}</td><td class="text-end">${rupiah(item.hargaTotal)}</td></tr>`;
+       tb.innerHTML += `
+        <tr>
+            <td>${item.produk} <br> <small class="text-muted">${item.tipe}</small></td>
+            <td class="text-center">${item.qty}</td>
+            <td class="text-end">${rupiah(item.hargaTotal)}</td>
+        </tr>`;
    });
 
-   // PERUBAHAN: Tambahkan Tombol Retur di Footer Modal Detail secara dinamis
+   // 4. SETUP TOMBOL (CETAK & RETUR)
    const footer = document.querySelector('#modalDetailTrx .modal-footer');
-   // Reset footer dulu
+   
+   // Reset isi footer
    footer.innerHTML = `<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>`;
    
-   // Tambah tombol RETUR
+   // A. Tombol CETAK (Hanya muncul untuk Penjualan)
+   if(tipe === 'JUAL') {
+       const btnCetak = document.createElement('button');
+       btnCetak.className = 'btn btn-primary ms-2 fw-bold';
+       btnCetak.innerHTML = '<i class="material-icons align-middle" style="font-size:16px">print</i> CETAK';
+       
+       btnCetak.onclick = () => {
+           // Siapkan Data Invoice dari data Riwayat
+           const payloadInvoice = {
+               pelanggan: trx.pelanggan,
+               kasir: trx.kasir || 'Admin',
+               metode: trx.metode || 'Tunai', 
+               jatuhTempo: trx.jatuhTempo || '',
+               items: trx.items.map(i => ({
+                   produkNama: i.produk,
+                   qty: i.qty,
+                   tipe: i.tipe,
+                   // Hitung harga satuan manual (karena di history cuma simpan total)
+                   hargaSatuan: (i.qty > 0) ? (i.hargaTotal / i.qty) : 0, 
+                   total: i.hargaTotal
+               }))
+           };
+
+           // Tutup modal detail, buka invoice
+           bootstrap.Modal.getInstance(document.getElementById('modalDetailTrx')).hide();
+           tampilkanInvoice(payloadInvoice, trx.id);
+       };
+       footer.appendChild(btnCetak);
+   }
+
+   // B. Tombol RETUR
    const btnRetur = document.createElement('button');
    btnRetur.className = 'btn btn-danger ms-2';
    btnRetur.innerText = 'RETUR / BATAL';
    btnRetur.onclick = () => {
-       // Tutup modal detail, buka modal form retur
        bootstrap.Modal.getInstance(document.getElementById('modalDetailTrx')).hide();
        bukaFormRetur(trx, tipe);
    };
    footer.appendChild(btnRetur);
 
+   // Tampilkan Modal
    new bootstrap.Modal(document.getElementById('modalDetailTrx')).show();
 }
 
@@ -2057,25 +2172,34 @@ function tampilkanInvoice(dataPayload, idTrx) {
             </tr>`;
     });
 
-    // --- 3. HEADER PERUSAHAAN DINAMIS ---
-    // Gunakan Default jika data kosong
-    const namaPT = globalCompanyProfile.nama_perusahaan || 'NAMA PERUSAHAAN ANDA';
-    const alamatPT = globalCompanyProfile.alamat || 'Alamat Perusahaan';
-    const noPT = globalCompanyProfile.no_perusahaan || '-';
+    // --- SETUP HEADER DENGAN LOGO ---
+        const namaPT = globalCompanyProfile.nama_perusahaan || 'NAMA PERUSAHAAN';
+        const alamatPT = globalCompanyProfile.alamat || '-';
+        const noPT = globalCompanyProfile.no_perusahaan || '-';
+        
+        // Cek apakah ada logo?
+        let htmlLogo = '';
+        if(globalCompanyProfile.logo_perusahaan) {
+            // Logo ditampilkan di kiri nama PT
+            htmlLogo = `<img src="${globalCompanyProfile.logo_perusahaan}" style="height: 50px; width: auto; margin-right: 15px;">`;
+        }
 
-    const headerPT = `
-         <div class="d-flex justify-content-between border-bottom border-2 border-dark pb-2 mb-2">
-             <div>
-                 <h4 class="fw-bold text-danger m-0 text-uppercase">${namaPT}</h4>
-                 <small class="text-muted fw-bold" style="font-size:9pt">Telp: ${noPT}</small><br>
-                 <small class="text-muted" style="font-size:8pt">${alamatPT}</small>
-             </div>
-             <div class="text-end">
-                 <h4 class="fw-bold text-dark" id="judul-dokumen">INVOICE</h4>
-                 <div style="font-size:9pt">${tglSekarang}</div>
-                 <div class="text-danger fw-bold" style="font-size:10pt">${idTrx}</div>
-             </div>
-         </div>`;
+        const headerPT = `
+            <div class="d-flex justify-content-between border-bottom border-2 border-dark pb-2 mb-2">
+                <div class="d-flex align-items-center">
+                    ${htmlLogo} 
+                    <div>
+                        <h4 class="fw-bold text-danger m-0 text-uppercase" style="font-size:16pt;">${namaPT}</h4>
+                        <small class="text-muted fw-bold" style="font-size:9pt">Telp: ${noPT}</small><br>
+                        <small class="text-muted" style="font-size:8pt; display:block; max-width:300px; line-height:1.2;">${alamatPT}</small>
+                    </div>
+                </div>
+                <div class="text-end">
+                    <h4 class="fw-bold text-dark" id="judul-dokumen">INVOICE</h4>
+                    <div style="font-size:9pt">${tglSekarang}</div>
+                    <div class="text-danger fw-bold" style="font-size:10pt">${idTrx}</div>
+                </div>
+            </div>`;
 
     // --- 4. HALAMAN 1: INVOICE (DENGAN TTD PELANGGAN) ---
     // Perhatikan bagian footer di bawah ini sudah saya ubah jadi 3 kolom
