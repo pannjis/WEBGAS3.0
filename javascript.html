@@ -4,6 +4,7 @@
   let globalListPelanggan = [];
   let globalListSupplier = [];
   let globalKeuanganData = [];
+  let globalListAkun = [];
   let payrollDataTemp = [];
   let keranjangBelanja = [];
   let globalRiwayatData = [];
@@ -80,6 +81,50 @@ function tampilkanMenuDefault() {
     }
     container.classList.remove('d-none'); // Pastikan muncul
 }
+
+// Panggil fungsi ini saat halaman dimuat, misal gabungkan di loadSemuaDataAwal()
+function loadMetodeBayarKasir() {
+    const sel = document.getElementById('pos-metode-bayar');
+    
+    google.script.run.withSuccessHandler(akunList => {
+        sel.innerHTML = ''; // Bersihkan dulu
+
+        // 1. Masukkan Akun-Akun Keuangan (Tunai, BCA, BRI, dll)
+        akunList.forEach(akun => {
+            // Value kita isi dengan Nama Akun agar nyambung ke sheet KEUANGAN
+            sel.innerHTML += `<option value="${akun.nama}">${akun.nama}</option>`;
+        });
+
+        // 2. Tambahkan Garis Pemisah (Opsional, agar rapi)
+        sel.innerHTML += `<option disabled>------------------</option>`;
+
+        // 3. Tambahkan Opsi HUTANG (Wajib ada)
+        sel.innerHTML += `<option value="Hutang">⚠️ Hutang / Bon</option>`;
+        
+    }).getDaftarAkun(); // Fungsi ini sudah kita buat di langkah sebelumnya
+}
+
+// [PENTING] Update Event Listener agar Hutang tetap memunculkan tanggal jatuh tempo
+// Ganti event listener lama 'pos-metode-bayar' dengan yang ini:
+document.getElementById('pos-metode-bayar')?.addEventListener('change', function() {
+    const val = this.value;
+    const box = document.getElementById('box-jatuh-tempo');
+    
+    // Logic: Jika pilih Hutang, munculkan tanggal. Jika Akun Bank/Tunai, sembunyikan.
+    if(val === 'Hutang') {
+        box.classList.remove('d-none');
+        const nextWeek = new Date();
+        nextWeek.setDate(nextWeek.getDate() + 7);
+        // Cek apakah flatpickr aktif
+        if(document.getElementById('pos-jatuh-tempo')._flatpickr) {
+             document.getElementById('pos-jatuh-tempo')._flatpickr.setDate(nextWeek);
+        } else {
+             document.getElementById('pos-jatuh-tempo').value = nextWeek.toISOString().split('T')[0];
+        }
+    } else {
+        box.classList.add('d-none');
+    }
+});
 
 // 2. Saat Mengetik / Hapus Teks (Input Event)
 document.getElementById('kasir-pelanggan')?.addEventListener('input', function() {
@@ -344,10 +389,12 @@ function loadSemuaDataAwal() {
     // Khusus Dropdown Pelanggan (untuk Kasir)
     loadPelangganDropdown();
     loadCompanyProfile(); 
+    loadMetodeBayarKasir();
 }
 
+// Tambahkan di fungsi switchSettingTab yang sudah ada
 function switchSettingTab(tab, btn) {
-   // Reset UI
+   // Reset UI (Sembunyikan semua konten)
    document.querySelectorAll('.setting-content').forEach(el => el.classList.add('d-none'));
    document.querySelectorAll('.list-group-item').forEach(el => el.classList.remove('active'));
    
@@ -356,6 +403,94 @@ function switchSettingTab(tab, btn) {
    btn.classList.add('active');
 
    if(tab === 'users') loadUsers();
+   if(tab === 'akun') loadSettingAkun(); // <--- TAMBAHAN: Load Akun saat tab diklik
+}
+
+// UPDATE 1: Fungsi Load Tabel Setting (Menampilkan No Rek)
+function loadSettingAkun() {
+    const tbody = document.querySelector('#tabel-setting-akun tbody');
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center">Loading...</td></tr>';
+
+    google.script.run.withSuccessHandler(data => {
+        tbody.innerHTML = '';
+        if(data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Belum ada akun.</td></tr>';
+            return;
+        }
+
+        data.forEach(acc => {
+            // acc.norek sekarang sudah tersedia dari backend
+            let displayNorek = acc.norek ? acc.norek : '-';
+
+            tbody.innerHTML += `
+            <tr>
+                <td class="fw-bold text-dark">${acc.nama}</td>
+                <td class="text-primary fw-bold" style="font-family:monospace; font-size:1.1em;">${displayNorek}</td>
+                <td><span class="badge bg-light text-dark border">${acc.tipe}</span></td>
+                <td>${rupiah(acc.saldo)}</td>
+                <td>
+                    <button class="btn btn-sm btn-light text-danger border" onclick="hapusAkunJS('${acc.id}')">
+                        <i class="material-icons" style="font-size:14px">delete</i>
+                    </button>
+                </td>
+            </tr>
+            `;
+        });
+    }).getDaftarAkun();
+}
+
+// UPDATE 2: Fungsi Modal (Reset Input Baru)
+function modalTambahAkun() {
+    document.getElementById('input-akun-nama').value = '';
+    document.getElementById('input-akun-norek').value = ''; // Reset Norek
+    document.getElementById('input-akun-tipe').value = 'Bank';
+    document.getElementById('input-akun-saldo').value = '0';
+    new bootstrap.Modal(document.getElementById('modalAkunBaru')).show();
+}
+
+// UPDATE 3: Fungsi Simpan (Kirim Norek)
+function simpanAkunBaruJS() {
+    const nama = document.getElementById('input-akun-nama').value;
+    const norek = document.getElementById('input-akun-norek').value || '-'; // Ambil Norek
+    const tipe = document.getElementById('input-akun-tipe').value;
+    const saldo = document.getElementById('input-akun-saldo').value;
+
+    if(!nama) return myAlert('Error', 'Nama akun wajib diisi', 'warning');
+
+    const payload = {
+        nama: nama,
+        norek: norek, // Masukkan ke payload
+        tipe: tipe,
+        saldo: saldo
+    };
+
+    loading(true);
+    google.script.run.withSuccessHandler(res => {
+        loading(false);
+        bootstrap.Modal.getInstance(document.getElementById('modalAkunBaru')).hide();
+        myAlert('Sukses', res, 'success');
+        
+        loadSettingAkun(); 
+        loadMetodeBayarKasir(); 
+
+    }).simpanAkunBaru(payload);
+}
+
+function hapusAkunJS(id) {
+    myConfirm('Hapus Akun', 'Yakin ingin menghapus akun ini? Data transaksi lama tetap ada, tapi akun hilang dari pilihan.', () => {
+        loading(true);
+        google.script.run.withSuccessHandler(res => {
+            loading(false);
+            
+            // Refresh Tabel Pengaturan
+            loadSettingAkun();
+            
+            // [TAMBAHAN PENTING] Refresh Dropdown Kasir
+            loadMetodeBayarKasir(); 
+            
+            myAlert('Info', res, 'success');
+        }).hapusAkun(id);
+    });
 }
 
 // 1. FUNGSI PREVIEW LOGO (Baru)
@@ -1185,7 +1320,7 @@ function eksekusiBayarUtama() {
         if(!tglJatuhTempo) return myAlert('Data Belum Lengkap', 'Isi tanggal jatuh tempo.', 'warning');
     }
 
-    // Konfirmasi Akhir (Total Uang)
+    // Konfirmasi Akhir
     myConfirm('Konfirmasi Pembayaran', `Total Transaksi: ${totalBayarStr}\nMetode: ${metodeDipilih}\n\nSimpan data ini?`, () => {
         const payload = {
             pelanggan: pelangganDipilih,
@@ -1198,10 +1333,19 @@ function eksekusiBayarUtama() {
         loading(true);
         google.script.run.withSuccessHandler(res => {
            loading(false);
+           
+           // 1. Tampilkan Invoice
            const idTrxSementara = 'KBA-' + Date.now(); 
            tampilkanInvoice(payload, idTrxSementara);
+           
+           // 2. Reset Form
            document.getElementById('kasir-pelanggan').value = ""; 
-           loadProduk(); 
+           
+           // 3. REFRESH DATA (INI YANG KEMARIN LUPA)
+           loadProduk();       // Update Stok
+           loadDashboard();    // Update Angka Dashboard (Realtime)
+           loadKeuangan();     // Update Tabel Arus Kas (Realtime)
+           
         }).withFailureHandler(err => {
            loading(false);
            myAlert('Gagal', err.message, 'error');
@@ -2272,43 +2416,78 @@ document.getElementById('filter-keu-text')?.addEventListener('keyup', function(e
     if(e.key === 'Enter') terapkanFilterKeuangan();
 });
 
-function bukaModalKeuangan() {
-    // --- UPDATE PERBAIKAN TANGGAL DISINI ---
+// [BARU] Load Data Akun dari Server
+function loadDataAkun() {
+    google.script.run.withSuccessHandler(data => {
+        globalListAkun = data; // Simpan ke global
+        
+        // Render ke Dropdown Modal Keuangan
+        const selKeu = document.getElementById('keu-akun');
+        selKeu.innerHTML = '';
+        data.forEach(a => {
+            selKeu.innerHTML += `<option value="${a.nama}" data-saldo="${a.saldo}">${a.nama}</option>`;
+        });
+        
+        // Trigger update tampilan saldo
+        cekSaldoUI(); 
+
+    }).getDaftarAkun();
+}
+
+// [BARU] Update Tampilan Saldo saat Dropdown diganti
+function cekSaldoUI() {
+    const sel = document.getElementById('keu-akun');
+    const saldo = sel.options[sel.selectedIndex]?.getAttribute('data-saldo') || 0;
     
-    // 1. Ambil Elemen & Tanggal Hari Ini
+    // Tampilkan dengan format Rupiah
+    document.getElementById('label-saldo-akun').innerText = rupiah(saldo);
+    
+    // Sedikit logika visual: Kalau saldo minus/nol kasih warna merah
+    if(saldo <= 0) {
+        document.getElementById('label-saldo-akun').className = "fw-bold text-danger";
+    } else {
+        document.getElementById('label-saldo-akun').className = "fw-bold text-primary";
+    }
+}
+
+function bukaModalKeuangan() {
+    // --- 1. SETUP TANGGAL (Flatpickr / Manual) ---
     const elTanggal = document.getElementById('keu-tanggal');
     const today = new Date();
 
-    // 2. Cek apakah elemen ini dikontrol oleh Flatpickr?
     if (elTanggal._flatpickr) {
-        // Jika YA: Gunakan fungsi setDate bawaan Flatpickr (parameter 'true' agar tampilan refresh)
         elTanggal._flatpickr.setDate(today, true);
     } else {
-        // Jika TIDAK (Fallback): Gunakan cara manual HTML biasa (YYYY-MM-DD)
-        // Kita gunakan toLocaleDateString agar sesuai zona waktu lokal (WIB), bukan UTC
         const offset = today.getTimezoneOffset() * 60000;
         const localISOTime = (new Date(today - offset)).toISOString().slice(0, 10);
         elTanggal.value = localISOTime;
     }
 
-    // --- BATAS UPDATE (Kode di bawah ini biarkan tetap sama) ---
-
-    // Reset Form Lainnya
-    document.getElementById('keu-nominal').value = ''; 
-    document.getElementById('keu-ket').value = '';
-    document.getElementById('keu-jenis').selectedIndex = 0; 
+    // --- 2. LOAD DATA BARU (Akun & Kategori) ---
+    // Penting: Panggil ini agar dropdown Akun & Kategori selalu update
+    loadDataAkun(); 
     refreshDropdownKategori(); 
 
-    // Visual Mode Baru
-    document.getElementById('modalKeuanganTitle').innerText = "Catat Transaksi Baru";
-    document.getElementById('modalKeuanganTitle').className = "fw-bold text-primary"; 
-
+    // --- 3. RESET FORM INPUT ---
+    document.getElementById('keu-jenis').selectedIndex = 0; // Reset ke Pengeluaran
+    document.getElementById('keu-nominal').value = ''; 
+    document.getElementById('keu-ket').value = '';
+    
+    // --- 4. RESET TAMPILAN UI (PENTING UNTUK MENCEGAH BUG EDIT) ---
+    // Pastikan judul dan tombol kembali ke mode "Catat Baru", bukan "Edit"
+    document.getElementById('modalKeuanganTitle').innerHTML = '<i class="material-icons align-middle me-2">edit_note</i>Catat Transaksi';
+    document.getElementById('modalKeuanganTitle').className = "fw-bold text-white"; // Kembalikan warna text
+    
+    // Reset Tombol Simpan
     const btn = document.getElementById('btn-simpan-keuangan');
-    btn.removeAttribute('data-id'); 
-    btn.innerText = "SIMPAN DATA"; 
-    btn.className = "btn btn-primary fw-bold"; 
+    btn.removeAttribute('data-id'); // Hapus ID edit jika ada
+    btn.innerText = "SIMPAN TRANSAKSI"; 
+    btn.className = "btn btn-primary w-100 fw-bold rounded-pill"; // Kembalikan warna tombol
 
+    // --- 5. TAMPILKAN MODAL ---
     new bootstrap.Modal(document.getElementById('modalKeuangan')).show();
+    
+    // Opsional: Fokus otomatis ke input nominal setelah modal muncul
     setTimeout(() => document.getElementById('keu-nominal').focus(), 500);
 }
 
@@ -2381,11 +2560,9 @@ function hapusKeuangan(id) {
     });
 }
 
+// [UPDATE] Fungsi Simpan Keuangan (Kirim Data Akun)
 function simpanKeuangan() {
-    const btn = document.getElementById('btn-simpan-keuangan');
-    const idEdit = btn.getAttribute('data-id'); 
-    
-    // ... (kode pengambilan value input tetap sama) ...
+    const akun = document.getElementById('keu-akun').value;
     const tgl = document.getElementById('keu-tanggal').value;
     const jenis = document.getElementById('keu-jenis').value;
     const kategori = document.getElementById('keu-kategori').value;
@@ -2393,48 +2570,108 @@ function simpanKeuangan() {
     const nominal = rawNominal.replace(/\./g, ''); 
     const ket = document.getElementById('keu-ket').value;
 
-    if(!tgl) return myAlert('Eits!', 'Tanggal wajib diisi.', 'warning');
-    if(!nominal || nominal == 0) return myAlert('Eits!', 'Nominal wajib diisi.', 'warning');
-    if(!kategori) return myAlert('Info', 'Pilih kategori dulu.', 'warning');
+    if(!akun) return myAlert('Error', 'Pilih akun pembayaran dulu.', 'warning');
+    if(!nominal || nominal == 0) return myAlert('Error', 'Nominal wajib diisi.', 'warning');
 
     const dataKirim = { 
-        id: idEdit, 
         tanggal: tgl, 
         jenis: jenis, 
         kategori: kategori, 
         nominal: nominal, 
-        keterangan: ket 
+        keterangan: ket,
+        akun: akun // [BARU]
     };
 
     loading(true);
     google.script.run.withSuccessHandler(res => { 
         loading(false);
-        
-        // [UPDATE FIX] Cek apakah res ada isinya?
-        if (!res) {
-            // Jika res null, berarti error di server tapi tidak fatal
-            bootstrap.Modal.getInstance(document.getElementById('modalKeuangan')).hide();
-            loadKeuangan(); 
-            loadDashboard();
-            return; 
-        }
-
-        // Tutup Modal Input
         bootstrap.Modal.getInstance(document.getElementById('modalKeuangan')).hide();
-        
-        // Refresh Tabel & Dashboard
         loadKeuangan(); 
         loadDashboard(); 
-
-        // --- KONFIRMASI CETAK NOTA ---
-        // Sekarang aman karena sudah dicek 'res' tidak null
-        if(res.status === 'success') {
-            myConfirm('Berhasil Disimpan', 'Apakah Anda ingin mencetak Nota Bukti Transaksi ini?', () => {
-                cetakNotaKeuangan(res.data); 
-            });
-        }
-
+        myAlert('Sukses', 'Transaksi berhasil disimpan!', 'success');
     }).simpanKeuangan(dataKirim);
+}
+
+function bukaModalTransfer() {
+    // 1. Ambil data akun terbaru
+    loading(true);
+    google.script.run.withSuccessHandler(data => {
+        loading(false);
+        globalListAkun = data;
+        
+        const selAsal = document.getElementById('trf-asal');
+        const selTujuan = document.getElementById('trf-tujuan');
+        
+        selAsal.innerHTML = '';
+        selTujuan.innerHTML = '';
+        
+        data.forEach(a => {
+            selAsal.innerHTML += `<option value="${a.nama}" data-saldo="${a.saldo}">${a.nama}</option>`;
+            selTujuan.innerHTML += `<option value="${a.nama}">${a.nama}</option>`;
+        });
+
+        // Update Saldo Asal
+        cekSaldoTransfer();
+        
+        // Reset Input
+        document.getElementById('trf-nominal').value = '';
+        document.getElementById('trf-ket').value = '';
+        
+        new bootstrap.Modal(document.getElementById('modalTransfer')).show();
+
+    }).getDaftarAkun();
+}
+
+function cekSaldoTransfer() {
+    const sel = document.getElementById('trf-asal');
+    const saldo = sel.options[sel.selectedIndex]?.getAttribute('data-saldo') || 0;
+    
+    // Update teks saldo dengan format yang lebih rapi
+    const elSaldo = document.getElementById('saldo-trf-asal');
+    elSaldo.innerText = rupiah(saldo);
+
+    // Visual feedback: Jika saldo 0, warnanya merah. Jika ada isinya, warna biru.
+    if(Number(saldo) <= 0) {
+        elSaldo.classList.remove('text-primary');
+        elSaldo.classList.add('text-danger');
+    } else {
+        elSaldo.classList.remove('text-danger');
+        elSaldo.classList.add('text-primary');
+    }
+}
+function eksekusiTransfer() {
+    const asal = document.getElementById('trf-asal').value;
+    const tujuan = document.getElementById('trf-tujuan').value;
+    const rawNominal = document.getElementById('trf-nominal').value;
+    const nominal = Number(rawNominal.replace(/\./g, ''));
+    const ket = document.getElementById('trf-ket').value;
+
+    if(asal === tujuan) return myAlert('Error', 'Akun asal dan tujuan tidak boleh sama.', 'warning');
+    if(nominal <= 0) return myAlert('Error', 'Nominal transfer tidak valid.', 'warning');
+
+    // Cek saldo cukup gak? (Opsional, kalau mau maksa transfer biarin aja)
+    const selAsal = document.getElementById('trf-asal');
+    const saldoAsal = Number(selAsal.options[selAsal.selectedIndex]?.getAttribute('data-saldo') || 0);
+    
+    if(nominal > saldoAsal) {
+         if(!confirm(`Saldo akun ${asal} hanya ${rupiah(saldoAsal)}. Transfer akan membuat saldo minus. Lanjutkan?`)) return;
+    }
+
+    const payload = {
+        akunAsal: asal,
+        akunTujuan: tujuan,
+        nominal: nominal,
+        ket: ket
+    };
+
+    loading(true);
+    google.script.run.withSuccessHandler(res => {
+        loading(false);
+        bootstrap.Modal.getInstance(document.getElementById('modalTransfer')).hide();
+        loadKeuangan();
+        loadDashboard();
+        myAlert('Berhasil', 'Transfer saldo sukses!', 'success');
+    }).prosesTransferSaldo(payload);
 }
 
 // 2. Fungsi Refresh Dropdown (Dipisahkan agar bisa dipanggil ulang)
