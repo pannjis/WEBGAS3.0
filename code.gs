@@ -23,9 +23,10 @@ function setupDatabase() {
     {name: 'KEUANGAN', header: ['ID', 'Tanggal', 'Jenis', 'Kategori', 'Nominal', 'Keterangan', 'Akun']}, 
     {name: 'KATEGORI', header: ['Nama_Kategori']},
     {name: 'KARYAWAN', header: ['ID', 'Nama', 'NoHP', 'Gaji_Pokok', 'Bonus_Per_Pcs', 'Status']}, 
-    {name: 'KASBON', header: ['ID_Kasbon', 'Tanggal', 'Nama_Karyawan', 'Nominal', 'Keterangan', 'Status_Lunas']},
+    {name: 'RIWAYAT_GAJI', header: ['ID_Gaji', 'Periode', 'Tanggal_Generate', 'Nama_Karyawan', 'Gaji_Pokok', 'Bonus', 'Potongan_Kasbon', 'Total_THP', 'Status']}, 
+    {name: 'KASBON', header: ['ID_Kasbon', 'Tanggal', 'Nama_Karyawan', 'Nominal', 'Keterangan', 'Status_Lunas', 'Sudah_Bayar', 'Tenor', 'Angsuran_Per_Bulan']},
+    {name: 'RIWAYAT_BAYAR_KASBON', header: ['ID_Bayar', 'ID_Kasbon', 'Tanggal_Bayar', 'Nominal_Bayar', 'Tipe_Bayar', 'Keterangan']},
     {name: 'PENGATURAN', header: ['Key', 'Value']},
-    // [BARU] Sheet untuk menyimpan Daftar Akun/Dompet
     {name: 'AKUN_KAS', header: ['ID_Akun', 'Nama_Akun', 'No_Rekening', 'Tipe', 'Saldo_Awal']} 
   ];
 
@@ -1056,41 +1057,154 @@ function hapusKaryawan(id) {
   }
 }
 
-// --- SDM: KASBON ---
-function simpanKasbon(form) {
-  SpreadsheetApp.getActiveSpreadsheet().getSheetByName('KASBON')
-    .appendRow(['KSB-' + Date.now(), new Date(), form.nama, form.nominal, form.ket, 'Belum Lunas']);
-  return "Kasbon Dicatat";
+// 2. FUNGSI BAYAR KASBON MANUAL (TUNAI)
+function bayarCicilanManual(form) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetKasbon = ss.getSheetByName('KASBON');
+  const sheetRiwayat = ss.getSheetByName('RIWAYAT_BAYAR_KASBON');
+  const sheetKeu = ss.getSheetByName('KEUANGAN');
+  
+  const dataKasbon = sheetKasbon.getDataRange().getValues();
+  const idKasbon = form.idKasbon;
+  const nominalBayar = Number(form.nominal);
+  
+  // A. Cari Data Kasbon
+  let rowTarget = -1;
+  let sisaHutang = 0;
+  let namaKaryawan = '';
+
+  for(let i=1; i<dataKasbon.length; i++) {
+     if(dataKasbon[i][0] == idKasbon) {
+        rowTarget = i+1;
+        namaKaryawan = dataKasbon[i][2];
+        let totalHutang = Number(dataKasbon[i][3]);
+        let sudahBayar = Number(dataKasbon[i][6]) || 0;
+        sisaHutang = totalHutang - sudahBayar;
+        
+        // Validasi: Jangan bayar lebih dari sisa hutang
+        if(nominalBayar > sisaHutang) throw new Error("Nominal pembayaran melebihi sisa hutang!");
+        
+        // Update 'Sudah Bayar'
+        let newSudahBayar = sudahBayar + nominalBayar;
+        sheetKasbon.getRange(rowTarget, 7).setValue(newSudahBayar);
+        
+        // Update Status Lunas
+        if(newSudahBayar >= totalHutang) {
+            sheetKasbon.getRange(rowTarget, 6).setValue('Lunas');
+        }
+        break;
+     }
+  }
+
+  if(rowTarget == -1) throw new Error("Data Kasbon tidak ditemukan.");
+
+  // B. Catat History Pembayaran
+  sheetRiwayat.appendRow([
+     'PAY-' + Date.now(),
+     idKasbon,
+     new Date(),
+     nominalBayar,
+     'Manual (Tunai)', // Tipe Bayar
+     form.keterangan || 'Pembayaran Cicilan Manual'
+  ]);
+
+  // C. Catat Pemasukan Keuangan (Karena terima duit tunai)
+  sheetKeu.appendRow([
+     'INC-' + Date.now(), new Date(), 'Pemasukan', 'Cicilan Kasbon', 
+     nominalBayar, `Cicilan ${namaKaryawan}`, 'Kas Tunai (Laci)' 
+  ]);
+
+  return "Pembayaran berhasil dicatat!";
 }
 
-// --- SDM: PAYROLL LOGIC ---
+// Update fungsi ini di Code.gs
+function getDetailHistoryKasbon(idKasbon) {
+  const data = getData('RIWAYAT_BAYAR_KASBON');
+  
+  // Safety: Jika sheet kosong atau belum dibuat, kembalikan array kosong []
+  if (!data || data.length === 0) return [];
+
+  // Filter: Gunakan '==' (loose equality) agar ID string "123" cocok dengan angka 123
+  let history = data.filter(r => r[1] == idKasbon).map(r => ({
+      tanggal: r[2],
+      nominal: r[3],
+      tipe: r[4],
+      ket: r[5]
+  }));
+  
+  // Sort: Urutkan dari tanggal terbaru ke terlama
+  return history.sort((a,b) => new Date(b.tanggal) - new Date(a.tanggal));
+}
+
+// 2. UPDATE: SIMPAN KASBON (Dengan Tenor)
+function simpanKasbon(form) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('KASBON');
+  
+  // Hitung Angsuran (Bulatkan ke atas biar rapi)
+  const tenor = Number(form.tenor) || 1;
+  const nominal = Number(form.nominal);
+  const angsuran = Math.ceil(nominal / tenor);
+
+  // Kolom: ID, Tgl, Nama, Nominal, Ket, Status, Sudah_Bayar, Tenor, Angsuran
+  sheet.appendRow([
+      'KSB-' + Date.now(), 
+      new Date(), 
+      form.nama, 
+      nominal, 
+      form.ket, 
+      'Belum Lunas', 
+      0,       // Sudah Bayar (Awal 0)
+      tenor,   // Tenor
+      angsuran // Angsuran per Bulan
+  ]);
+  
+  return `Kasbon Rp ${Number(nominal).toLocaleString('id-ID')} (Cicil ${tenor}x) berhasil disimpan!`;
+}
+
+// 3. UPDATE: DATA PAYROLL (Otomatis ambil nilai Angsuran)
 function getDataPayroll() {
   const karyawan = getData('KARYAWAN');
-  const kasbonData = getData('KASBON');
-  
+  const kasbonData = getData('KASBON'); // Pastikan sheet KASBON sudah punya kolom baru
+
   let result = karyawan.map(k => {
     let nama = k[1];
     let gaji = Number(k[3]);
     let bonusSet = Number(k[4]);
     
-    // Hitung Kasbon Belum Lunas
-    let totalKasbon = 0;
+    let totalHutang = 0;
+    let tagihanBulanIni = 0; // Ini yang akan masuk otomatis ke potongan
+
     kasbonData.forEach(ksb => {
-      if(ksb[2] === nama && ksb[5] === 'Belum Lunas') {
-        totalKasbon += Number(ksb[3]);
+      // ksb[2]=Nama, ksb[3]=Nominal, ksb[5]=Status, ksb[6]=SudahBayar, ksb[8]=AngsuranPerBulan
+      if(ksb[2] === nama && String(ksb[5]).includes('Belum Lunas')) {
+        let nominalUtang = Number(ksb[3]);
+        let sudahBayar = Number(ksb[6]) || 0;
+        let sisa = nominalUtang - sudahBayar;
+        
+        totalHutang += sisa;
+
+        // Ambil Angsuran (Jika kolom index 8 kosong/undefined, anggap 1x bayar sisa semua)
+        let angsuran = Number(ksb[8]); 
+        if(!angsuran || angsuran === 0) angsuran = sisa;
+
+        // Logika Pintar: 
+        // Tagihan adalah Angsuran, TAPI tidak boleh melebihi Sisa Hutang
+        // (Contoh: Sisa hutang 100rb, angsuran 300rb -> ya tagih 100rb aja)
+        let harusBayar = Math.min(angsuran, sisa);
+        
+        tagihanBulanIni += harusBayar;
       }
     });
-    
-    // Bonus Sementara (Dummy: 0), nanti bisa dikembangkan hitung jumlah penjualan kasir
-    let totalBonus = 0; 
 
     return {
       id: k[0],
       nama: nama,
       gaji: gaji,
-      bonus: totalBonus,
-      kasbon: totalKasbon,
-      total: gaji + totalBonus - totalKasbon
+      bonus: bonusSet,
+      sisaHutang: totalHutang, 
+      kasbonPotongan: tagihanBulanIni, // <--- INI NILAI CICILAN OTOMATISNYA
+      total: gaji + bonusSet - tagihanBulanIni
     };
   });
   return result;
@@ -1120,14 +1234,95 @@ function prosesPayrollFinal(listGaji) {
   return "Gaji Dicairkan & Kasbon Terpotong.";
 }
 
-function TES_BIKIN_FILE() {
-  // ID Folder Anda
-  const id = '15hiLtvusofF2OJpXVq8lJkePbmqVIuPM'; 
+// AMBIL DATA KASBON (LENGKAP: LUNAS & BELUM)
+function getDataKasbonFull() {
+  return getData('KASBON');
+}
+
+// AMBIL RIWAYAT GAJI BERDASARKAN PERIODE (Bulan-Tahun)
+function getRiwayatGajiByPeriode(periode) { // Format periode: "2024-01"
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('RIWAYAT_GAJI');
+  if(!sheet) return [];
   
-  const folder = DriveApp.getFolderById(id);
+  const data = sheet.getDataRange().getValues();
+  // Filter berdasarkan kolom Periode (Index 1)
+  // Skip header (mulai i=1)
+  let hasil = [];
+  for(let i=1; i<data.length; i++) {
+     if(data[i][1] == periode) {
+        hasil.push({
+           id: data[i][0],
+           periode: data[i][1],
+           tgl: data[i][2],
+           nama: data[i][3],
+           gaji: data[i][4],
+           bonus: data[i][5],
+           kasbon: data[i][6],
+           total: data[i][7],
+           status: data[i][8]
+        });
+     }
+  }
+  return hasil;
+}
+
+// 4. UPDATE SIMPAN GAJI BULANAN (Agar Payment Payroll Juga Masuk History)
+function simpanGajiBulanan(periode, listGaji) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetRiwayat = ss.getSheetByName('RIWAYAT_GAJI');
+  const sheetKasbonHistory = ss.getSheetByName('RIWAYAT_BAYAR_KASBON'); // <--- Tambah ini
+  const keuSheet = ss.getSheetByName('KEUANGAN');
+  const kasbonSheet = ss.getSheetByName('KASBON');
+  const kasbonData = kasbonSheet.getDataRange().getValues();
   
-  // Kita coba bikin file teks kosong beneran untuk mancing izin "Write"
-  folder.createFile('Tes_Izin.txt', 'Halo, ini tes izin upload.');
-  
-  console.log("Sukses! Izin Upload sudah aktif.");
+  const waktu = new Date();
+  let totalKeluar = 0;
+
+  listGaji.forEach(k => {
+      // 1. Simpan Gaji (Sama seperti sebelumnya)
+      sheetRiwayat.appendRow(['PAY-' + Date.now() + Math.random(), periode, waktu, k.nama, k.gaji, k.bonus, k.potonganManual, k.total, 'Sukses']);
+      totalKeluar += Number(k.total);
+
+      // 2. PROSES UPDATE KASBON (LOGIC BARU)
+      let bayarBulanIni = Number(k.potonganManual);
+      
+      if(bayarBulanIni > 0) {
+          // Cari bon karyawan yg belum lunas
+          for(let i=1; i<kasbonData.length; i++) {
+            let rowId = kasbonData[i][0];
+            let rowNama = kasbonData[i][2];
+            let rowNominal = Number(kasbonData[i][3]);
+            let rowStatus = String(kasbonData[i][5]);
+            let sudahBayar = Number(kasbonData[i][6]) || 0; 
+
+            if(rowNama == k.nama && rowStatus.includes('Belum Lunas') && bayarBulanIni > 0) {
+               let sisaTagihanItemIni = rowNominal - sudahBayar;
+               let alokasi = Math.min(sisaTagihanItemIni, bayarBulanIni);
+               
+               let newSudahBayar = sudahBayar + alokasi;
+               
+               // A. Update Sheet KASBON
+               kasbonSheet.getRange(i+1, 7).setValue(newSudahBayar); 
+               if(newSudahBayar >= rowNominal) {
+                   kasbonSheet.getRange(i+1, 6).setValue('Lunas');
+               }
+
+               // B. CATAT KE RIWAYAT PEMBAYARAN KASBON (PENTING!)
+               sheetKasbonHistory.appendRow([
+                   'AUTO-' + Date.now() + i,
+                   rowId,        // ID Kasbonnya
+                   waktu,        // Tanggal Bayar
+                   alokasi,      // Nominal
+                   'Potong Gaji',// Tipe
+                   'Payroll Periode ' + periode
+               ]);
+               
+               bayarBulanIni -= alokasi;
+            }
+          }
+      }
+  });
+
+  keuSheet.appendRow(['PAYROLL-' + periode, waktu, 'Pengeluaran', 'Gaji Karyawan', totalKeluar, `Payroll Periode ${periode}`]);
+  return "Gaji Periode " + periode + " berhasil diproses!";
 }
