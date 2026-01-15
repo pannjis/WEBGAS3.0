@@ -4,6 +4,7 @@
   let globalListPelanggan = [];
   let globalListSupplier = [];
   let globalKeuanganData = [];
+  let sessionPayrollData = [];
   let globalListAkun = [];
   let dataGajiPreview = [];
   let payrollDataTemp = [];
@@ -2762,70 +2763,86 @@ function switchTab(tabId, el) {
     if(tabId === 'penggajian') initPenggajian();
 }
 
-  function loadKaryawan() {
+// [UPDATE] Load Karyawan dengan Tombol Edit yang Benar
+function loadKaryawan() {
     google.script.run.withSuccessHandler(d => {
-      const tb = document.querySelector('#tabel-karyawan tbody'); const sk = document.getElementById('kasbon-nama');
+      const tb = document.querySelector('#tabel-karyawan tbody'); 
+      const sk = document.getElementById('kasbon-nama');
       tb.innerHTML=''; sk.innerHTML='';
+      
       d.forEach(r => {
-        tb.innerHTML+=`<tr><td>${r[1]}</td><td>${r[2]}</td><td>${rupiah(r[3])}</td><td>${rupiah(r[4])}</td><td><button class="btn btn-sm btn-danger" onclick="hapusKaryawan('${r[0]}')">X</button></td></tr>`;
+        // r[3] Gaji, r[4] Bonus
+        // Kita siapkan data untuk diedit
+        let gajiFmt = r[3]; 
+        let bonusFmt = r[4];
+
+        tb.innerHTML += `
+            <tr>
+                <td>${r[1]}</td>
+                <td>${r[2]}</td>
+                <td>${rupiah(r[3])}</td>
+                <td>${rupiah(r[4])}</td>
+                <td>
+                    <button class="btn btn-sm btn-warning text-dark me-1" onclick="bukaEditKaryawan('${r[0]}','${r[1]}','${r[2]}','${gajiFmt}','${bonusFmt}')">
+                        <i class="material-icons" style="font-size:14px">edit</i>
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="hapusKaryawan('${r[0]}')">
+                        <i class="material-icons" style="font-size:14px">delete</i>
+                    </button>
+                </td>
+            </tr>`;
         sk.innerHTML+=`<option>${r[1]}</option>`;
       });
     }).getData('KARYAWAN');
-  }
+}
 
-  // Cari fungsi modalKaryawan() di javascript.html dan GANTI dengan ini:
-  function modalKaryawan() { 
-      // Reset semua field agar bersih saat dibuka
-      document.getElementById('kry-id').value = '';
-      document.getElementById('kry-nama').value = '';
-      document.getElementById('kry-hp').value = '';
-      document.getElementById('kry-gaji').value = '';
-      document.getElementById('kry-bonus').value = '';
-      
-      // Tampilkan Modal
-      new bootstrap.Modal(document.getElementById('modalKaryawan')).show(); 
-  }
+// [BARU] Fungsi Buka Edit Karyawan
+function bukaEditKaryawan(id, nama, hp, gaji, bonus) {
+    document.getElementById('kry-id').value = id;
+    document.getElementById('kry-nama').value = nama;
+    document.getElementById('kry-hp').value = hp;
+    
+    // Format Ribuan saat ditampilkan di input
+    document.getElementById('kry-gaji').value = Number(gaji).toLocaleString('id-ID');
+    document.getElementById('kry-bonus').value = Number(bonus).toLocaleString('id-ID');
+    
+    new bootstrap.Modal(document.getElementById('modalKaryawan')).show(); 
+}
 
-// Cari fungsi simpanKaryawanDB() di javascript.html dan GANTI dengan ini:
+function modalKaryawan() { 
+    document.getElementById('kry-id').value = '';
+    document.getElementById('kry-nama').value = '';
+    document.getElementById('kry-hp').value = '';
+    document.getElementById('kry-gaji').value = '';
+    document.getElementById('kry-bonus').value = '';
+    new bootstrap.Modal(document.getElementById('modalKaryawan')).show(); 
+}
+
+// [UPDATE] Simpan Karyawan (Hapus Titik Ribuan)
 function simpanKaryawanDB() {
-    // 1. Ambil Data dari Form
+    // Ambil value dan buang titiknya
+    const rawGaji = document.getElementById('kry-gaji').value.replace(/\./g, '');
+    const rawBonus = document.getElementById('kry-bonus').value.replace(/\./g, '');
+
     const d = { 
         id: document.getElementById('kry-id').value, 
         nama: document.getElementById('kry-nama').value, 
         hp: document.getElementById('kry-hp').value, 
-        gaji: document.getElementById('kry-gaji').value, 
-        bonus: document.getElementById('kry-bonus').value 
+        gaji: rawGaji,   // Kirim angka murni
+        bonus: rawBonus  // Kirim angka murni
     };
 
-    // 2. Validasi (Cegah nama kosong)
     if(!d.nama) return myAlert('Error', 'Nama karyawan wajib diisi!', 'warning');
 
-    // 3. Tampilkan Loading
     loading(true);
-
-    // 4. Kirim ke Server (Code.gs)
     google.script.run
         .withSuccessHandler((res) => {
-            // Matikan Loading
             loading(false); 
-            
-            // Tutup Modal
             const modalEl = document.getElementById('modalKaryawan');
             const modalInstance = bootstrap.Modal.getInstance(modalEl);
             if(modalInstance) modalInstance.hide();
-            
-            // Refresh Tabel Karyawan
             loadKaryawan(); 
-            
-            // Tampilkan Popup Sukses
             myAlert('Berhasil', res, 'success');
-
-            // Reset Form (Agar data lama hilang)
-            document.getElementById('kry-id').value = '';
-            document.getElementById('kry-nama').value = '';
-            document.getElementById('kry-hp').value = '';
-            document.getElementById('kry-gaji').value = '';
-            document.getElementById('kry-bonus').value = '';
         })
         .withFailureHandler((err) => {
             loading(false);
@@ -2833,7 +2850,8 @@ function simpanKaryawanDB() {
         })
         .simpanKaryawan(d);
 }
-  function hapusKaryawan(id) { if(confirm('Hapus?')) google.script.run.withSuccessHandler(loadKaryawan).hapusKaryawan(id); }
+
+function hapusKaryawan(id) { if(confirm('Hapus?')) google.script.run.withSuccessHandler(loadKaryawan).hapusKaryawan(id); }
 
 // 1. UPDATE FUNGSI LOAD KASBON (Tambah Tombol Detail)
 function loadKasbon() {
@@ -2883,11 +2901,11 @@ function loadKasbon() {
     }).getDataKasbonFull();
 }
 
-// 2. BUKA MODAL DETAIL & LOAD HISTORY
+// [UPDATE FINAL] Buka Detail Kasbon + Tombol Cetak Rekap Full
 function bukaModalBayarKasbon(id, nama, total, sudah) {
     let sisa = total - sudah;
     
-    // Isi Summary
+    // Isi Summary Info
     document.getElementById('det-kasbon-id').value = id;
     document.getElementById('det-kasbon-nama').innerText = nama;
     document.getElementById('det-kasbon-total').innerText = rupiah(total);
@@ -2895,40 +2913,87 @@ function bukaModalBayarKasbon(id, nama, total, sudah) {
     document.getElementById('det-kasbon-sisa').innerText = rupiah(sisa);
     document.getElementById('input-bayar-cicilan').value = '';
 
-    // Hide form jika sudah lunas
+    // Hide form bayar jika sudah lunas
+    const formArea = document.getElementById('form-bayar-manual-area');
     if(sisa <= 0) {
-        document.getElementById('form-bayar-manual-area').classList.add('d-none');
+        formArea.classList.add('d-none');
     } else {
-        document.getElementById('form-bayar-manual-area').classList.remove('d-none');
+        formArea.classList.remove('d-none');
+        
+        // Load Akun ke Dropdown
+        const selAkun = document.getElementById('input-bayar-akun');
+        selAkun.innerHTML = '<option value="">Loading...</option>';
+        google.script.run.withSuccessHandler(akunList => {
+            selAkun.innerHTML = '';
+            akunList.forEach(a => {
+                let selected = a.nama.toLowerCase().includes('tunai') ? 'selected' : '';
+                selAkun.innerHTML += `<option value="${a.nama}" ${selected}>${a.nama}</option>`;
+            });
+        }).getDaftarAkun();
+    }
+
+    // --- [UPDATE UI] HEADER RIWAYAT DENGAN TOMBOL CETAK ---
+    const headerRiwayat = document.querySelector('#modalDetailKasbon h6.mt-4'); // Selector header "Riwayat Pembayaran"
+    
+    // Kita ganti HTML header riwayat agar ada tombol di kanannya
+    // Kita buat container flex
+    if(headerRiwayat) {
+        headerRiwayat.outerHTML = `
+        <div class="d-flex justify-content-between align-items-center mt-4 border-bottom pb-2 mb-2">
+            <h6 class="fw-bold m-0">Riwayat Pembayaran</h6>
+            <button id="btn-cetak-rekap" class="btn btn-sm btn-dark rounded-pill px-3" disabled>
+                <i class="material-icons align-middle" style="font-size:14px">print</i> Cetak Rekap
+            </button>
+        </div>`;
     }
 
     // Load Tabel History
     const tbHistory = document.querySelector('#tabel-history-cicilan tbody');
-    tbHistory.innerHTML = '<tr><td colspan="4" class="text-center">Memuat riwayat...</td></tr>'; // colspan jadi 4
+    tbHistory.innerHTML = '<tr><td colspan="4" class="text-center">Memuat riwayat...</td></tr>';
     
     new bootstrap.Modal(document.getElementById('modalDetailKasbon')).show();
 
-    // --- BAGIAN INI YANG DI-UPDATE ---
+    // AMBIL DATA RIWAYAT
     google.script.run.withSuccessHandler(hist => {
         tbHistory.innerHTML = '';
-        
-        // FIX: Cek jika hist itu null, undefined, atau kosong
+        const btnCetakRekap = document.getElementById('btn-cetak-rekap');
+
         if(!hist || hist.length === 0) {
             tbHistory.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">Belum ada riwayat pembayaran.</td></tr>';
+            if(btnCetakRekap) btnCetakRekap.disabled = true; // Disable tombol jika tidak ada data
             return;
         }
 
-        // Ambil info sisa hutang terakhir dari modal
+        // Aktifkan Tombol Cetak & Pasang Event Listener
+        if(btnCetakRekap) {
+            btnCetakRekap.disabled = false;
+            btnCetakRekap.onclick = () => {
+                // Siapkan Data Objek Lengkap untuk dicetak
+                const dataLengkap = {
+                    idKasbon: id,
+                    namaKaryawan: nama,
+                    totalPinjam: total,
+                    totalBayar: sudah,
+                    sisaHutang: sisa,
+                    listRiwayat: hist // Array history lengkap
+                };
+                cetakRekapKasbonFull(dataLengkap);
+            };
+        }
+
+        // Render Tabel (Sama seperti sebelumnya)
         const currentSisaStr = document.getElementById('det-kasbon-sisa').innerText;
         const currentSisa = Number(currentSisaStr.replace(/[^0-9,-]+/g,""));
 
         hist.forEach(h => {
             let tgl = new Date(h.tanggal).toLocaleDateString('id-ID');
             
-            // Perbaiki tampilan Badge agar lebih rapi
-            let badgeTipe = h.tipe.includes('Manual') 
-                ? '<span class="badge bg-success bg-opacity-10 text-success border border-success">Manual (Tunai)</span>'
-                : '<span class="badge bg-warning bg-opacity-10 text-dark border border-warning">Potong Gaji</span>';
+            let badgeTipe = '';
+            if(String(h.tipe).includes('Manual')) {
+                badgeTipe = `<span class="badge bg-success bg-opacity-10 text-success border border-success">${h.tipe}</span>`;
+            } else {
+                badgeTipe = `<span class="badge bg-warning bg-opacity-10 text-dark border border-warning">${h.tipe}</span>`;
+            }
             
             const printData = JSON.stringify({
                 idKasbon: id, 
@@ -2949,7 +3014,7 @@ function bukaModalBayarKasbon(id, nama, total, sudah) {
                     </td>
                     <td class="text-end fw-bold text-dark">${rupiah(h.nominal)}</td>
                     <td class="text-center">
-                        <button class="btn btn-sm btn-outline-dark rounded-circle p-1 shadow-sm" onclick="cetakSlipKasbon(${printData})" title="Cetak Bukti">
+                        <button class="btn btn-sm btn-outline-dark rounded-circle p-1 shadow-sm" onclick="cetakSlipKasbon(${printData})" title="Cetak Struk Ini">
                             <i class="material-icons" style="font-size:16px">print</i>
                         </button>
                     </td>
@@ -2959,48 +3024,85 @@ function bukaModalBayarKasbon(id, nama, total, sudah) {
     }).getDetailHistoryKasbon(id);
 }
 
-// GANTI fungsi prosesBayarCicilanManual yang lama dengan ini:
+// [UPDATE] Proses Bayar Cicilan (Kirim Akun yang Dipilih)
 function prosesBayarCicilanManual() {
     const id = document.getElementById('det-kasbon-id').value;
-    const nama = document.getElementById('det-kasbon-nama').innerText; // Ambil nama dari modal
-    const nominal = document.getElementById('input-bayar-cicilan').value;
+    const nama = document.getElementById('det-kasbon-nama').innerText; 
+    
+    // AMBIL AKUN
+    const akunDipilih = document.getElementById('input-bayar-akun').value;
+    
+    // AMBIL NOMINAL (BERSIHKAN TITIK)
+    const rawNominal = document.getElementById('input-bayar-cicilan').value;
+    const nominalStr = rawNominal.replace(/\./g, ''); 
+    const nominal = Number(nominalStr);
 
+    // VALIDASI
+    if(!akunDipilih) return myAlert('Error', 'Silakan pilih Akun Pembayaran dulu!', 'warning');
     if(!nominal || nominal <= 0) return myAlert('Error', 'Nominal tidak valid', 'warning');
 
-    myConfirm('Bayar Kasbon', `Terima pembayaran cicilan sebesar ${rupiah(nominal)}?`, () => {
+    myConfirm('Konfirmasi Bayar', `Terima pembayaran ${rupiah(nominal)} via ${akunDipilih}?`, () => {
         loading(true);
+        
+        const payload = { 
+            idKasbon: id, 
+            nominal: nominal,
+            akun: akunDipilih // Kirim nama akun ke backend
+        };
+
         google.script.run.withSuccessHandler(res => {
             loading(false);
             
-            // 1. Tampilkan Sukses
-            myAlert('Sukses', res, 'success');
-            bootstrap.Modal.getInstance(document.getElementById('modalDetailKasbon')).hide();
+            // 1. TUTUP MODAL
+            const modalEl = document.getElementById('modalDetailKasbon');
+            const modalInstance = bootstrap.Modal.getInstance(modalEl);
+            if(modalInstance) modalInstance.hide();
             
-            // 2. Refresh Tabel Utama
-            loadKasbon(); 
+            // 2. REFRESH SEMUA (Agar saldo akun di keuangan juga update)
+            loadKasbon();     
+            loadDashboard();  
+            loadKeuangan();   
 
-            // 3. CETAK SLIP OTOMATIS
-            // Hitung sisa baru (Sisa Lama - Bayar Baru)
+            // 3. CETAK SLIP
             const sisaLamaStr = document.getElementById('det-kasbon-sisa').innerText;
             const sisaLama = Number(sisaLamaStr.replace(/[^0-9,-]+/g,""));
             const sisaBaru = sisaLama - nominal;
 
-            cetakSlipKasbon({
+            const dataCetak = {
                 idKasbon: id,
                 nama: nama,
                 tanggal: new Date().toLocaleDateString('id-ID'),
                 nominal: nominal,
-                tipe: 'Manual (Tunai)',
+                tipe: `Manual (${akunDipilih})`, // Tampilkan nama akun di struk
                 ket: 'Pembayaran Cicilan Manual',
                 sisa: sisaBaru
-            });
+            };
+
+            setTimeout(() => {
+                const header = document.getElementById('globalModalHeader');
+                const btnYes = document.getElementById('btn-confirm');
+                
+                myConfirm('Pembayaran Berhasil', 'Data tersimpan. Cetak struk sekarang?', () => {
+                    cetakSlipKasbon(dataCetak);
+                });
+
+                if(header) {
+                    header.className = 'modal-header text-white bg-success';
+                    document.getElementById('globalModalIcon').innerText = 'check_circle';
+                }
+                if(btnYes) {
+                    btnYes.innerText = "YA, CETAK STRUK";
+                    btnYes.className = 'btn btn-success fw-bold px-4';
+                }
+            }, 500); 
 
         }).withFailureHandler(err => {
             loading(false);
             myAlert('Gagal', err.message, 'error');
-        }).bayarCicilanManual({ idKasbon: id, nominal: nominal });
+        }).bayarCicilanManual(payload);
     });
 }
+
 function initPenggajian() {
     // Set default bulan ini
     const today = new Date();
@@ -3014,6 +3116,7 @@ function initPenggajian() {
     }
 }
 
+// [UPDATE FIX] Cek Data Gaji (Anti Error Null)
 function cekDataGaji() {
     const periode = document.getElementById('filter-periode-gaji').value;
     if(!periode) return;
@@ -3022,19 +3125,23 @@ function cekDataGaji() {
     const msg = document.getElementById('status-periode-msg');
     const tbody = document.getElementById('tbody-gaji');
 
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center">Memeriksa data...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center py-3"><div class="spinner-border text-primary spinner-border-sm"></div> Memeriksa data...</td></tr>';
     btnArea.innerHTML = '';
 
-    google.script.run.withSuccessHandler(data => {
-        if(data.length > 0) {
-            // KASUS 1: DATA SUDAH ADA (HISTORY)
+    google.script.run
+    .withFailureHandler(err => {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">Gagal: ${err.message}</td></tr>`;
+    })
+    .withSuccessHandler(data => {
+        // [PENTING] Pastikan data tidak null
+        const safeData = data || []; 
+
+        if(safeData.length > 0) {
+            // SUDAH DIBAYAR (Tampilkan Tabel History Hijau)
             msg.innerHTML = `<span class="text-success fw-bold"><i class="material-icons align-middle" style="font-size:14px">check_circle</i> Data Gaji Periode ${periode} Sudah Dibayar.</span>`;
             
-            // Render Tabel History
             tbody.innerHTML = '';
-            let totalAll = 0;
-            data.forEach(row => {
-                totalAll += Number(row.total);
+            safeData.forEach(row => {
                 tbody.innerHTML += `
                     <tr>
                         <td class="fw-bold">${row.nama}</td>
@@ -3047,7 +3154,7 @@ function cekDataGaji() {
                 `;
             });
 
-            // Tombol Print
+            // Tombol Cetak
             btnArea.innerHTML = `
                 <button class="btn btn-outline-dark rounded-pill fw-bold" onclick="printLaporanPDF('tabel-gaji-detail', 'Slip Gaji ${periode}')">
                     <i class="material-icons align-middle">print</i> Cetak Laporan
@@ -3055,131 +3162,268 @@ function cekDataGaji() {
             `;
 
         } else {
-            // KASUS 2: DATA BELUM ADA (GENERATE BARU)
+            // BELUM DIBAYAR (Tampilkan Form Input Draft)
             msg.innerHTML = `<span class="text-warning fw-bold"><i class="material-icons align-middle" style="font-size:14px">warning</i> Data Gaji Periode ${periode} Belum Ada.</span>`;
             
-            // Load Preview Hitungan Gaji
             loadPreviewHitungGaji(periode);
         }
     }).getRiwayatGajiByPeriode(periode);
 }
 
-// --- 4. UPDATE LOAD PREVIEW GAJI (Agar input box terisi otomatis) ---
-// Ganti fungsi loadPreviewHitungGaji yang lama dengan yang ini
+// [UPDATE MAJOR] Load Preview dengan Konsep Verifikasi
 function loadPreviewHitungGaji(periode) {
     const tbody = document.getElementById('tbody-gaji');
     const btnArea = document.getElementById('btn-area-gaji');
 
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center">Memuat data karyawan...</td></tr>';
+
     google.script.run.withSuccessHandler(data => {
-        dataGajiPreview = data; 
-        tbody.innerHTML = '';
+        // Simpan data mentah ke variabel global session
+        // Kita tambahkan properti 'status' default 'Draft'
+        sessionPayrollData = data.map(item => ({
+            ...item,
+            statusVerifikasi: 'Draft',
+            kasbonBaru: 0, // Untuk simpan kasbon baru jika ada
+            potonganLain: 0,
+            ketKasbonBaru: ''
+        })); 
         
-        if(data.length === 0) {
-             tbody.innerHTML = '<tr><td colspan="6" class="text-center">Tidak ada karyawan aktif.</td></tr>';
-             return;
-        }
+        renderTabelPayroll(); // Panggil fungsi render terpisah
 
-        data.forEach((p, index) => {
-            let inputKasbonHTML = '';
-            let infoSisa = '';
-
-            // Jika ada hutang
-            if(p.sisaHutang > 0) {
-                infoSisa = `<br><small class="text-danger fw-bold" style="font-size:10px;">Sisa Hutang: ${rupiah(p.sisaHutang)}</small>`;
-                
-                // --- DISINI PERUBAHANNYA ---
-                // Value input otomatis terisi p.kasbonPotongan (Hasil hitungan cicilan)
-                inputKasbonHTML = `
-                    <div class="input-group input-group-sm" style="width: 130px;">
-                        <input type="number" class="form-control border-danger text-danger fw-bold input-potongan-gaji" 
-                               data-index="${index}" 
-                               value="${p.kasbonPotongan}" 
-                               max="${p.sisaHutang}"
-                               onkeyup="hitungUlangBaris(${index})"
-                               placeholder="0">
-                    </div>
-                `;
-            } else {
-                inputKasbonHTML = `<input type="hidden" class="input-potongan-gaji" data-index="${index}" value="0"><span class="text-muted">-</span>`;
-            }
-
-            let inputBonusHTML = `
-                 <input type="number" class="form-control form-control-sm border-success text-success fw-bold input-bonus-gaji"
-                        style="width: 100px;"
-                        data-index="${index}"
-                        value="${p.bonus}"
-                        onkeyup="hitungUlangBaris(${index})">
-            `;
-
-            // Hitung total awal tampilan
-            let totalAwal = p.gaji + p.bonus - p.kasbonPotongan;
-
-            tbody.innerHTML += `
-                <tr id="row-gaji-${index}">
-                    <td class="fw-bold">
-                        ${p.nama}
-                        ${infoSisa}
-                    </td>
-                    <td>
-                        <input type="hidden" class="val-gaji" value="${p.gaji}">
-                        ${rupiah(p.gaji)}
-                    </td>
-                    <td>${inputBonusHTML}</td>
-                    <td>${inputKasbonHTML}</td>
-                    <td class="fw-bold fs-6 text-primary val-thp">
-                        ${rupiah(totalAwal)}
-                    </td>
-                    <td><span class="badge bg-secondary">DRAFT</span></td>
-                </tr>
-            `;
-        });
-
+        // Tombol Cairkan (Disabled di awal)
         btnArea.innerHTML = `
-            <button class="btn btn-primary rounded-pill fw-bold shadow px-4" onclick="prosesSimpanGaji('${periode}')">
-                <i class="material-icons align-middle">save</i> PROSES & CAIRKAN GAJI
+            <button id="btn-cairkan-final" class="btn btn-secondary rounded-pill fw-bold shadow px-4" onclick="prosesCairkanSemua('${periode}')" disabled>
+                <i class="material-icons align-middle">lock</i> SELESAIKAN VERIFIKASI DULU
             </button>
         `;
 
     }).getDataPayroll(); 
 }
 
-// --- HITUNG ULANG OTOMATIS SAAT DIKETIK ---
-function hitungUlangBaris(index) {
-    // Ambil elemen di baris tersebut
-    const row = document.getElementById(`row-gaji-${index}`);
-    const gaji = Number(row.querySelector('.val-gaji').value);
+// [BARU] Fungsi Render Tabel dari Session Data
+function renderTabelPayroll() {
+    const tbody = document.getElementById('tbody-gaji');
+    tbody.innerHTML = '';
     
-    // Ambil nilai inputan user
-    const elBonus = row.querySelector('.input-bonus-gaji');
-    const elPotongan = row.querySelector('.input-potongan-gaji');
-    
-    let bonus = Number(elBonus.value) || 0;
-    let potongan = Number(elPotongan.value) || 0;
+    let verifiedCount = 0;
 
-    // Hitung Total Baru
-    let totalBaru = gaji + bonus - potongan;
+    if(sessionPayrollData.length === 0) {
+         tbody.innerHTML = '<tr><td colspan="6" class="text-center">Tidak ada karyawan aktif.</td></tr>';
+         return;
+    }
 
-    // Update Tampilan Total
-    row.querySelector('.val-thp').innerText = rupiah(totalBaru);
+    sessionPayrollData.forEach((p, index) => {
+        // Tentukan warna badge status
+        let badgeStatus = p.statusVerifikasi === 'Sesuai' 
+            ? '<span class="badge bg-success"><i class="material-icons align-middle" style="font-size:10px">check</i> Sesuai</span>' 
+            : '<span class="badge bg-secondary">Draft</span>';
+        
+        if(p.statusVerifikasi === 'Sesuai') verifiedCount++;
+
+        let infoHutang = p.sisaHutang > 0 ? `<div class="text-danger small" style="font-size:10px">Sisa Hutang: ${rupiah(p.sisaHutang)}</div>` : '';
+
+        tbody.innerHTML += `
+            <tr id="row-gaji-${index}" class="${p.statusVerifikasi === 'Sesuai' ? 'table-success' : ''}">
+                <td class="fw-bold">
+                    ${p.nama}
+                    ${infoHutang}
+                </td>
+                <td>${rupiah(p.gaji)}</td>
+                <td class="text-success">${rupiah(p.bonus)}</td>
+                <td class="text-danger">${rupiah(p.kasbonPotongan + p.potonganLain)}</td>
+                <td class="fw-bold text-primary">${rupiah(p.total)}</td>
+                <td>
+                    <div class="d-flex align-items-center gap-2">
+                        ${badgeStatus}
+                        <button class="btn btn-sm btn-primary rounded-pill px-3" onclick="bukaModalVerifikasi(${index})">
+                            View / Edit
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+
+    // Update Status Tombol Cairkan
+    const btnFinal = document.getElementById('btn-cairkan-final');
+    if(btnFinal) {
+        if(verifiedCount === sessionPayrollData.length && verifiedCount > 0) {
+            btnFinal.disabled = false;
+            btnFinal.className = "btn btn-success rounded-pill fw-bold shadow px-4";
+            btnFinal.innerHTML = `<i class="material-icons align-middle">payments</i> CAIRKAN SEMUA (${verifiedCount})`;
+        } else {
+            btnFinal.disabled = true;
+            btnFinal.className = "btn btn-secondary rounded-pill fw-bold shadow px-4";
+            btnFinal.innerHTML = `<i class="material-icons align-middle">lock</i> VERIFIKASI ${verifiedCount}/${sessionPayrollData.length}`;
+        }
+    }
 }
 
-// --- SIMPAN DATA (AMBIL NILAI DARI INPUT) ---
+// [BARU] Buka Modal & Isi Data
+function bukaModalVerifikasi(index) {
+    const data = sessionPayrollData[index];
+    
+    document.getElementById('ver-index').value = index;
+    document.getElementById('ver-nama').innerText = data.nama;
+    
+    // Set Nilai Input (Format Ribuan)
+    document.getElementById('ver-gaji').value = Number(data.gaji).toLocaleString('id-ID');
+    document.getElementById('ver-bonus').value = Number(data.bonus).toLocaleString('id-ID');
+    
+    // Potongan Kasbon (Cicilan)
+    document.getElementById('ver-potongan-kasbon').value = Number(data.kasbonPotongan).toLocaleString('id-ID');
+    document.getElementById('info-sisa-hutang').innerText = `Total Hutang: ${rupiah(data.sisaHutang)}`;
+
+    // Potongan Lain (Manual)
+    document.getElementById('ver-potongan-lain').value = Number(data.potonganLain || 0).toLocaleString('id-ID');
+
+    // Kasbon Baru (Jika ada)
+    const checkKasbon = document.getElementById('check-kasbon-baru');
+    const areaKasbon = document.getElementById('area-kasbon-baru');
+    const inputKasbonBaru = document.getElementById('ver-kasbon-baru');
+    const inputKasbonKet = document.getElementById('ver-kasbon-ket');
+
+    if(data.kasbonBaru > 0) {
+        checkKasbon.checked = true;
+        areaKasbon.classList.remove('d-none');
+        inputKasbonBaru.value = Number(data.kasbonBaru).toLocaleString('id-ID');
+        inputKasbonKet.value = data.ketKasbonBaru;
+    } else {
+        checkKasbon.checked = false;
+        areaKasbon.classList.add('d-none');
+        inputKasbonBaru.value = '';
+        inputKasbonKet.value = '';
+    }
+
+    hitungTotalModal(); // Hitung awal
+    new bootstrap.Modal(document.getElementById('modalDetailGaji')).show();
+}
+
+// [BARU] Toggle Input Kasbon Baru
+function toggleKasbonBaru() {
+    const isChecked = document.getElementById('check-kasbon-baru').checked;
+    const area = document.getElementById('area-kasbon-baru');
+    if(isChecked) {
+        area.classList.remove('d-none');
+        document.getElementById('ver-kasbon-baru').focus();
+    } else {
+        area.classList.add('d-none');
+        document.getElementById('ver-kasbon-baru').value = 0;
+        hitungTotalModal();
+    }
+}
+
+// [BARU] Hitung Realtime di dalam Modal
+function hitungTotalModal() {
+    const gaji = Number(document.getElementById('ver-gaji').value.replace(/\./g, '')) || 0;
+    const bonus = Number(document.getElementById('ver-bonus').value.replace(/\./g, '')) || 0;
+    const cicilan = Number(document.getElementById('ver-potongan-kasbon').value.replace(/\./g, '')) || 0;
+    const potLain = Number(document.getElementById('ver-potongan-lain').value.replace(/\./g, '')) || 0;
+    
+    // Kasbon Baru (Menambah Uang Diterima, tapi nanti jadi hutang)
+    // Logika: Karyawan terima Gaji + Uang Pinjaman Baru
+    let kasbonBaru = 0;
+    if(document.getElementById('check-kasbon-baru').checked) {
+        kasbonBaru = Number(document.getElementById('ver-kasbon-baru').value.replace(/\./g, '')) || 0;
+    }
+
+    // Rumus THP: (Gaji + Bonus + PinjamanBaru) - (CicilanLama + PotonganLain)
+    const total = (gaji + bonus + kasbonBaru) - (cicilan + potLain);
+    
+    document.getElementById('ver-total').innerText = rupiah(total);
+}
+
+// [BARU] Simpan Perubahan ke Session Data
+function simpanVerifikasiKaryawan() {
+    const index = document.getElementById('ver-index').value;
+    
+    // Ambil Data Bersih
+    const bonus = Number(document.getElementById('ver-bonus').value.replace(/\./g, '')) || 0;
+    const cicilan = Number(document.getElementById('ver-potongan-kasbon').value.replace(/\./g, '')) || 0;
+    const potLain = Number(document.getElementById('ver-potongan-lain').value.replace(/\./g, '')) || 0;
+    
+    let kasbonBaru = 0;
+    let ketKasbon = '';
+    if(document.getElementById('check-kasbon-baru').checked) {
+        kasbonBaru = Number(document.getElementById('ver-kasbon-baru').value.replace(/\./g, '')) || 0;
+        ketKasbon = document.getElementById('ver-kasbon-ket').value;
+    }
+
+    // Validasi Sederhana
+    if(cicilan > sessionPayrollData[index].sisaHutang) {
+        // Opsional: Boleh bayar lebih buat lunasin? Boleh aja sih.
+        // if(!confirm('Potongan cicilan melebihi sisa hutang. Lanjutkan?')) return;
+    }
+
+    // Update Object Session
+    sessionPayrollData[index].bonus = bonus;
+    sessionPayrollData[index].kasbonPotongan = cicilan;
+    sessionPayrollData[index].potonganLain = potLain;
+    sessionPayrollData[index].kasbonBaru = kasbonBaru;
+    sessionPayrollData[index].ketKasbonBaru = ketKasbon;
+    
+    // Hitung Total Final untuk Data
+    // THP = (Gaji + Bonus + KasbonBaru) - (Cicilan + PotonganLain)
+    sessionPayrollData[index].total = (sessionPayrollData[index].gaji + bonus + kasbonBaru) - (cicilan + potLain);
+    
+    // Set Status
+    sessionPayrollData[index].statusVerifikasi = 'Sesuai';
+
+    // Tutup Modal & Refresh Tabel
+    bootstrap.Modal.getInstance(document.getElementById('modalDetailGaji')).hide();
+    renderTabelPayroll();
+}
+
+// [BARU] Proses Cairkan Final
+function prosesCairkanSemua(periode) {
+    // Filter hanya yang statusnya Sesuai (Preventif)
+    const dataFinal = sessionPayrollData.filter(p => p.statusVerifikasi === 'Sesuai');
+    
+    if(dataFinal.length === 0) return myAlert('Error', 'Belum ada data yang diverifikasi.', 'warning');
+
+    myConfirm('Konfirmasi Pencairan', `Cairkan gaji untuk ${dataFinal.length} karyawan?\nPastikan semua nominal sudah benar.`, () => {
+        loading(true);
+        google.script.run.withSuccessHandler(res => {
+            loading(false);
+            myAlert('Sukses', res, 'success');
+            
+            // Refresh Semua Data
+            setTimeout(() => {
+                cekDataGaji();
+                loadKasbon();
+                loadKeuangan();
+                loadDashboard();
+            }, 1000);
+
+        }).simpanGajiBulanan(periode, dataFinal);
+    });
+}
+
+// [UPDATE FIX] Proses Simpan Gaji (Membersihkan Titik Ribuan)
 function prosesSimpanGaji(periode) {
-    // Kita harus ambil nilai terbaru dari Input (karena user mungkin mengubahnya)
     let finalData = [];
     
-    // Loop data awal untuk mengambil referensi nama & id
+    // Loop data preview untuk mengambil nilai input terbaru
     dataGajiPreview.forEach((p, index) => {
         const row = document.getElementById(`row-gaji-${index}`);
-        const bonusVal = Number(row.querySelector('.input-bonus-gaji').value) || 0;
-        const potonganVal = Number(row.querySelector('.input-potongan-gaji').value) || 0;
         
+        // AMBIL NILAI INPUT & BUANG TITIKNYA
+        // Contoh: "500.000" -> replace titik -> "500000" -> Number -> 500000
+        const bonusStr = row.querySelector('.input-bonus-gaji').value.replace(/\./g, '');
+        const potonganStr = row.querySelector('.input-potongan-gaji').value.replace(/\./g, '');
+
+        const bonusVal = Number(bonusStr) || 0;
+        const potonganVal = Number(potonganStr) || 0;
+        
+        // Hitung ulang total di sini untuk memastikan akurasi
+        const totalFix = p.gaji + bonusVal - potonganVal;
+
         finalData.push({
             nama: p.nama,
             gaji: p.gaji,
-            bonus: bonusVal,          // Bonus hasil edit
-            potonganManual: potonganVal, // Potongan hasil edit
-            total: p.gaji + bonusVal - potonganVal
+            bonus: bonusVal,          
+            potonganManual: potonganVal, 
+            total: totalFix
         });
     });
 
@@ -3187,32 +3431,45 @@ function prosesSimpanGaji(periode) {
         loading(true);
         google.script.run.withSuccessHandler(res => {
             loading(false);
+            
+            // Tampilkan Pesan Sukses
             myAlert('Sukses', res, 'success');
-            cekDataGaji(); 
-            loadDashboard(); 
-        }).simpanGajiBulanan(periode, finalData); // Kirim data yang sudah diedit
+            
+            // REFRESH SEMUA HALAMAN PENTING
+            // Beri jeda sedikit agar server selesai menulis data
+            setTimeout(() => {
+                cekDataGaji();    // Refresh Tabel Gaji
+                loadKasbon();     // Refresh Tabel Kasbon
+                loadKeuangan();   // Refresh Keuangan
+                loadDashboard();  // Refresh Dashboard
+            }, 1000);
+
+        }).simpanGajiBulanan(periode, finalData); 
     });
 }
 
-// --- 1. FUNGSI HITUNG CICILAN REALTIME ---
+// [UPDATE] Hitung Cicilan Realtime (Support Ribuan)
 function hitungCicilan() {
-    const nominal = Number(document.getElementById('kasbon-nominal').value) || 0;
-    const tenor = Number(document.getElementById('kasbon-tenor').value) || 1;
+    // Ambil value input, buang titik
+    const rawNominal = document.getElementById('kasbon-nominal').value.replace(/\./g, '');
+    const nominal = Number(rawNominal) || 0;
     
-    // Cegah error bagi 0
+    const tenor = Number(document.getElementById('kasbon-tenor').value) || 1;
     let finalTenor = tenor < 1 ? 1 : tenor;
     
     let angsuran = Math.ceil(nominal / finalTenor);
-    
     document.getElementById('kasbon-estimasi').value = rupiah(angsuran);
 }
 
-// --- 2. UPDATE SIMPAN KASBON ---
+// [UPDATE] Simpan Kasbon (Support Ribuan)
 function simpanKasbon() {
+    // Ambil value input, buang titik
+    const rawNominal = document.getElementById('kasbon-nominal').value.replace(/\./g, '');
+
     const data = {
         nama: document.getElementById('kasbon-nama').value,
-        nominal: document.getElementById('kasbon-nominal').value,
-        tenor: document.getElementById('kasbon-tenor').value, // Kirim Tenor
+        nominal: rawNominal, // Kirim angka murni
+        tenor: document.getElementById('kasbon-tenor').value, 
         ket: document.getElementById('kasbon-ket').value
     };
 
@@ -3223,13 +3480,12 @@ function simpanKasbon() {
         loading(false);
         myAlert('Sukses', res, 'success');
         
-        // Reset Form
         document.getElementById('kasbon-nominal').value = '';
         document.getElementById('kasbon-tenor').value = '1';
         document.getElementById('kasbon-estimasi').value = 'Rp 0';
         document.getElementById('kasbon-ket').value = '';
         
-        loadKasbon(); // Refresh Tabel
+        loadKasbon(); 
     }).simpanKasbon(data);
 }
 
@@ -4187,138 +4443,215 @@ function cetakNotaKeuangan(data) {
     win.document.close();
 }
 
-// --- FUNGSI CETAK SLIP KASBON ---
+// [UPDATE FINAL] Cetak Slip Kasbon - Style Formal (Hitam Putih / Minimalis)
 function cetakSlipKasbon(data) {
-    // 1. Ambil Profil Perusahaan Global
     const namaPT = globalCompanyProfile.nama_perusahaan || 'NAMA PERUSAHAAN';
     const alamatPT = globalCompanyProfile.alamat || '-';
     const noPT = globalCompanyProfile.no_perusahaan || '-';
     const logoUrl = globalCompanyProfile.logo_perusahaan || '';
     
-    let htmlLogo = '';
-    if (logoUrl) {
-        htmlLogo = `<img src="${logoUrl}" style="height: 50px; width: auto; margin-right: 15px;">`;
+    // Logika Judul & Label
+    let judul = '';
+    let labelMetode = '';
+
+    if(String(data.tipe).includes('Manual')) {
+        judul = 'BUKTI SETORAN CICILAN';
+        labelMetode = 'PEMBAYARAN MANDIRI (TUNAI/BANK)';
+    } else {
+        judul = 'BUKTI POTONG GAJI';
+        labelMetode = 'PEMOTONGAN OTOMATIS (PAYROLL)';
     }
 
-    // 2. Setup Warna & Judul
-    let warna = data.tipe.includes('Manual') ? '#198754' : '#dc3545'; // Hijau (Tunai), Merah (Gaji)
-    let judul = data.tipe.includes('Manual') ? 'BUKTI SETOR TUNAI' : 'BUKTI POTONG GAJI';
-    let labelMetode = data.tipe.includes('Manual') ? 'TUNAI (CASH)' : 'POTONG GAJI (PAYROLL)';
+    let htmlLogo = logoUrl ? `<img src="${logoUrl}" alt="Logo">` : '';
 
-    // 3. Template HTML
-    const win = window.open('', '', 'height=600,width=800');
+    const win = window.open('', '', 'height=700,width=900');
     
     const htmlContent = `
-    <html>
+    <!DOCTYPE html>
+    <html lang="id">
     <head>
-        <title>Slip Kasbon - ${data.nama}</title>
+        <meta charset="UTF-8">
+        <title>Slip ${data.nama}</title>
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
-            body { font-family: 'Roboto', sans-serif; padding: 20px; color: #333; -webkit-print-color-adjust: exact; }
+            @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
             
-            .container { 
-                border: 1px solid #999; 
-                padding: 30px; 
-                max-width: 180mm; /* A5 Landscape Width Approx */
-                margin: 0 auto;
+            @page {
+                size: A5 landscape;
+                margin: 0; 
+            }
+
+            body {
+                font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; /* Font standar dokumen resmi */
+                margin: 0;
+                padding: 0;
+                background-color: #e0e0e0; /* Abu saat preview */
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+            }
+
+            /* KONTEN UTAMA (Kertas A5) */
+            .slip-container {
+                width: 210mm;
+                height: 147mm; /* Pas 1 Lembar A5 */
                 background: #fff;
+                padding: 15mm;
+                box-sizing: border-box;
+                position: relative;
+                display: flex;
+                flex-direction: column;
+                color: #000;
+            }
+
+            /* HEADER */
+            .header {
+                display: flex;
+                align-items: center;
+                border-bottom: 2px solid #000; /* Garis Hitam Tegas */
+                padding-bottom: 15px;
+                margin-bottom: 20px;
+            }
+            .header-logo img { height: 50px; width: auto; margin-right: 20px; filter: grayscale(100%); /* Logo jadi hitam putih biar formal */ }
+            .header-info h2 { margin: 0; font-size: 18px; text-transform: uppercase; color: #000; letter-spacing: 1px; }
+            .header-info p { margin: 2px 0 0; font-size: 10px; color: #444; }
+
+            /* JUDUL DOKUMEN */
+            .doc-title {
+                text-align: center;
+                font-size: 14px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 2px;
+                margin-bottom: 25px;
+                text-decoration: underline;
+                text-underline-offset: 5px;
+            }
+
+            /* ISI: GRID 2 KOLOM */
+            .content-row {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 20px;
+                gap: 30px;
             }
             
-            /* Header */
-            .header { display: flex; align-items: center; border-bottom: 2px double #333; padding-bottom: 15px; margin-bottom: 20px; }
-            .header h2 { margin: 0; font-size: 18px; text-transform: uppercase; color: #d32f2f; }
-            .header p { margin: 0; font-size: 10px; color: #555; }
-
-            /* Judul Slip */
-            .judul-slip { 
-                text-align: center; font-size: 16px; font-weight: bold; 
-                background: ${warna}; color: white; padding: 8px; 
-                border-radius: 4px; margin-bottom: 20px; letter-spacing: 1px;
+            .col-left, .col-right {
+                flex: 1;
             }
 
-            /* Info Table */
-            .info-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            .info-table td { padding: 6px; font-size: 12px; border-bottom: 1px dashed #eee; }
-            .label { font-weight: bold; width: 140px; }
-            .val { font-weight: 500; }
-            .nominal-big { font-size: 18px; font-weight: bold; color: ${warna}; }
+            /* TABEL INFO */
+            .info-table { width: 100%; border-collapse: collapse; }
+            .info-table td {
+                padding: 6px 0;
+                font-size: 11px;
+                vertical-align: top;
+                border-bottom: 1px dotted #ccc;
+            }
+            .label { font-weight: bold; width: 120px; color: #333; text-transform: uppercase; font-size: 9px; }
+            .val { color: #000; font-weight: 500; }
 
-            /* Footer TTD */
-            .footer { display: flex; justify-content: space-between; margin-top: 40px; text-align: center; }
-            .ttd-box { width: 30%; }
-            .ttd-line { border-bottom: 1px solid #000; margin-top: 60px; font-weight: bold; font-size: 11px; }
+            /* KOTAK NOMINAL (GAYA BANK) */
+            .nominal-section {
+                margin-top: 10px;
+                text-align: right;
+                background-color: #f8f9fa; /* Abu sangat muda */
+                border: 1px solid #000;
+                padding: 15px;
+            }
+            .nom-label { font-size: 10px; text-transform: uppercase; font-weight: bold; color: #555; margin-bottom: 5px;}
+            .nom-value { font-size: 20px; font-weight: 700; color: #000; }
+            
+            .sisa-row {
+                display: flex; justify-content: flex-end; align-items: center;
+                margin-top: 5px; font-size: 11px; color: #333;
+            }
 
-            .watermark { 
-                position: absolute; top: 30%; left: 30%; 
-                font-size: 60px; color: rgba(0,0,0,0.05); 
-                transform: rotate(-30deg); font-weight: bold; z-index: 0; pointer-events: none;
+            /* FOOTER TANDA TANGAN */
+            .footer {
+                margin-top: auto; /* Dorong ke bawah */
+                display: flex;
+                justify-content: space-between;
+                padding-top: 10px;
+            }
+            .ttd-box { width: 30%; text-align: center; }
+            .ttd-title { font-size: 9px; text-transform: uppercase; font-weight: bold; margin-bottom: 50px; color: #555; }
+            .ttd-line { border-top: 1px solid #000; width: 80%; margin: 0 auto; }
+            .ttd-name { font-size: 10px; font-weight: 700; margin-top: 5px; text-transform: uppercase; }
+
+            /* INFO TAMBAHAN */
+            .meta-info {
+                position: absolute; bottom: 10mm; left: 15mm;
+                font-size: 8px; color: #666; font-family: monospace;
+            }
+
+            /* PRINT RESET */
+            @media print {
+                body { background: none; }
+                .slip-container { border: none; margin: 0; box-shadow: none; }
             }
         </style>
     </head>
     <body>
-        <div class="container">
-            <div class="watermark">LUNAS / CICIL</div>
-            
+        <div class="slip-container">
             <div class="header">
-                ${htmlLogo}
-                <div>
+                <div class="header-logo">${htmlLogo}</div>
+                <div class="header-info">
                     <h2>${namaPT}</h2>
-                    <p>${alamatPT}</p>
-                    <p>Telp: ${noPT}</p>
+                    <p>${alamatPT} | Telp: ${noPT}</p>
                 </div>
             </div>
 
-            <div class="judul-slip">${judul} - KASBON KARYAWAN</div>
+            <div class="doc-title">${judul}</div>
 
-            <table class="info-table">
-                <tr>
-                    <td class="label">No. Referensi</td>
-                    <td class="val">: ${'PAY-' + Date.now().toString().slice(-6)}</td>
-                </tr>
-                <tr>
-                    <td class="label">Tanggal Bayar</td>
-                    <td class="val">: ${data.tanggal}</td>
-                </tr>
-                <tr>
-                    <td class="label">Nama Karyawan</td>
-                    <td class="val">: <b>${data.nama}</b></td>
-                </tr>
-                <tr>
-                    <td class="label">Metode Bayar</td>
-                    <td class="val">: ${labelMetode}</td>
-                </tr>
-                <tr>
-                    <td class="label">Keterangan</td>
-                    <td class="val">: ${data.ket}</td>
-                </tr>
-                <tr>
-                    <td class="label" style="padding-top:15px">NOMINAL DIBAYAR</td>
-                    <td class="val" style="padding-top:15px">
-                        <span class="nominal-big">${rupiah(data.nominal)}</span>
-                    </td>
-                </tr>
-                <tr>
-                    <td class="label">Sisa Hutang (Saat Ini)</td>
-                    <td class="val">: <span style="color:red; font-weight:bold;">${rupiah(data.sisa)}</span></td>
-                </tr>
-            </table>
+            <div class="content-row">
+                <div class="col-left">
+                    <table class="info-table">
+                        <tr><td class="label">No. Referensi</td><td class="val">#${'PAY-' + Date.now().toString().slice(-6)}</td></tr>
+                        <tr><td class="label">Tanggal Transaksi</td><td class="val">${data.tanggal}</td></tr>
+                        <tr><td class="label">Nama Karyawan</td><td class="val" style="font-weight:bold; font-size:12px">${data.nama}</td></tr>
+                        <tr><td class="label">Metode Bayar</td><td class="val">${labelMetode}</td></tr>
+                        <tr><td class="label">Keterangan</td><td class="val" style="font-style:italic;">"${data.ket}"</td></tr>
+                    </table>
+                </div>
+
+                <div class="col-right">
+                    <div class="nominal-section">
+                        <div class="nom-label">Jumlah Dibayar (IDR)</div>
+                        <div class="nom-value">${rupiah(data.nominal)}</div>
+                        
+                        <div style="border-top: 1px solid #ccc; margin: 10px 0;"></div>
+                        
+                        <div class="sisa-row">
+                            <span style="margin-right: 10px;">Sisa Pokok Hutang:</span>
+                            <span style="font-weight:bold;">${rupiah(data.sisa)}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <div class="footer">
                 <div class="ttd-box">
-                    <small>Disetujui Oleh,</small>
-                    <div class="ttd-line">( Admin / HRD )</div>
+                    <div class="ttd-title">Diterima Oleh (Admin),</div>
+                    <div class="ttd-line"></div>
+                    <div class="ttd-name">.........................</div>
                 </div>
                 <div class="ttd-box">
-                    <small>Penyetor / Karyawan,</small>
-                    <div class="ttd-line">( ${data.nama} )</div>
+                    <div class="ttd-title">Penyetor (Karyawan),</div>
+                    <div class="ttd-line"></div>
+                    <div class="ttd-name">${data.nama}</div>
                 </div>
             </div>
 
-            <div style="margin-top:20px; font-size:9px; color:#999; text-align:center;">
-                Dicetak pada: ${new Date().toLocaleString('id-ID')} | System ID: ${data.idKasbon}
+            <div class="meta-info">
+                Dicetak: ${new Date().toLocaleString('id-ID')} | Ref ID: ${data.idKasbon}
             </div>
         </div>
-        <script>setTimeout(() => { window.print(); }, 800);
+
+        <script>
+            setTimeout(() => { window.print(); }, 1000);
         ` + '</sc' + 'ript>' + `
     </body>
     </html>
@@ -4328,6 +4661,215 @@ function cetakSlipKasbon(data) {
     win.document.close();
 }
 
+// [UPDATE FINAL] Cetak Rekap Lengkap Kasbon (Versi A4 Portrait)
+function cetakRekapKasbonFull(data) {
+    const namaPT = globalCompanyProfile.nama_perusahaan || 'NAMA PERUSAHAAN';
+    const alamatPT = globalCompanyProfile.alamat || '-';
+    const noPT = globalCompanyProfile.no_perusahaan || '-';
+    const logoUrl = globalCompanyProfile.logo_perusahaan || '';
+    
+    let htmlLogo = logoUrl ? `<img src="${logoUrl}" style="height: 60px; width: auto; margin-right: 20px; filter: grayscale(100%);">` : '';
+
+    // Generate Baris Tabel History
+    let rowsHTML = '';
+    if(data.listRiwayat.length === 0) {
+        rowsHTML = '<tr><td colspan="3" style="text-align:center; padding:20px;">Belum ada riwayat pembayaran.</td></tr>';
+    } else {
+        data.listRiwayat.forEach(item => {
+            let tgl = new Date(item.tanggal).toLocaleDateString('id-ID');
+            rowsHTML += `
+                <tr>
+                    <td>${tgl}</td>
+                    <td>
+                        <div style="font-weight:bold;">${item.tipe}</div>
+                        <div style="font-size:10px; color:#555;">${item.ket}</div>
+                    </td>
+                    <td style="text-align:right;">${rupiah(item.nominal)}</td>
+                </tr>
+            `;
+        });
+    }
+
+    const win = window.open('', '', 'height=800,width=700');
+    
+    const htmlContent = `
+    <!DOCTYPE html>
+    <html lang="id">
+    <head>
+        <meta charset="UTF-8">
+        <title>Rekap Kasbon - ${data.namaKaryawan}</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+            
+            /* SETTING KERTAS A4 PORTRAIT */
+            @page { 
+                size: A4; 
+                margin: 0; 
+            }
+
+            body {
+                font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+                margin: 0; padding: 0; background: #e0e0e0;
+                display: flex; justify-content: center; 
+                min-height: 100vh;
+                -webkit-print-color-adjust: exact; print-color-adjust: exact;
+            }
+
+            /* CONTAINER A4 */
+            .sheet {
+                width: 210mm; 
+                min-height: 297mm; /* Tinggi A4 */
+                background: #fff; 
+                padding: 15mm 20mm; /* Margin kiri-kanan lebih lega */
+                box-sizing: border-box; 
+                position: relative; 
+                display: flex; 
+                flex-direction: column;
+                box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            }
+
+            /* HEADER */
+            .header {
+                display: flex; align-items: center; border-bottom: 3px double #000;
+                padding-bottom: 15px; margin-bottom: 25px;
+            }
+            .header-info h2 { margin: 0; font-size: 20px; text-transform: uppercase; color: #000; letter-spacing: 1px; }
+            .header-info p { margin: 2px 0 0; font-size: 11px; color: #444; }
+            
+            /* JUDUL */
+            .doc-title {
+                text-align: center; font-size: 16px; font-weight: 800;
+                text-transform: uppercase; letter-spacing: 1.5px;
+                background: #f8f9fa; padding: 10px; margin-bottom: 30px; 
+                border-top: 1px solid #000; border-bottom: 1px solid #000;
+            }
+
+            /* SUMMARY GRID */
+            .info-grid {
+                display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-bottom: 30px;
+            }
+            .info-col {
+                display: flex; flex-direction: column; gap: 8px;
+            }
+            .row-item {
+                display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding-bottom: 2px;
+            }
+            .lbl { font-size: 11px; color: #666; font-weight: bold; text-transform: uppercase; }
+            .val { font-size: 13px; font-weight: bold; color: #000; }
+            .val-red { color: #d32f2f; font-size: 16px; }
+
+            /* TABEL HISTORY */
+            .table-container { flex-grow: 1; }
+            .tbl-rekap { width: 100%; border-collapse: collapse; font-size: 11px; }
+            .tbl-rekap th { 
+                background: #333; color: #fff; padding: 10px 8px; text-align: left; 
+                text-transform: uppercase; letter-spacing: 0.5px;
+            }
+            .tbl-rekap td { 
+                border-bottom: 1px solid #ddd; padding: 8px; vertical-align: top; 
+            }
+            .tbl-rekap tr:nth-child(even) { background-color: #f9f9f9; }
+
+            /* FOOTER */
+            .footer { 
+                margin-top: 50px; 
+                display: flex; justify-content: space-between; text-align: center; 
+                page-break-inside: avoid;
+            }
+            .ttd-box { width: 30%; }
+            .ttd-line { border-bottom: 1px solid #000; margin-top: 60px; font-weight: bold; font-size: 11px; }
+            .timestamp { margin-top: 30px; font-size: 9px; color: #999; text-align: center; }
+
+            /* PRINT STYLE */
+            @media print {
+                body { background: none; margin: 0; padding: 0; }
+                .sheet { margin: 0; box-shadow: none; border: none; width: 100%; height: auto; }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="sheet">
+            <div class="header">
+                ${htmlLogo}
+                <div class="header-info">
+                    <h2>${namaPT}</h2>
+                    <p>${alamatPT} | Telp: ${noPT}</p>
+                </div>
+            </div>
+
+            <div class="doc-title">REKAPITULASI PINJAMAN KARYAWAN</div>
+
+            <div class="info-grid">
+                <div class="info-col">
+                    <div class="row-item">
+                        <span class="lbl">ID Karyawan</span> <span class="val">-</span>
+                    </div>
+                    <div class="row-item">
+                        <span class="lbl">Nama Karyawan</span> <span class="val" style="font-size:14px">${data.namaKaryawan}</span>
+                    </div>
+                    <div class="row-item">
+                        <span class="lbl">ID Pinjaman</span> <span class="val">${data.idKasbon}</span>
+                    </div>
+                </div>
+                <div class="info-col" style="background:#fffcfc; padding:10px; border:1px solid #eee;">
+                    <div class="row-item">
+                        <span class="lbl">Total Pinjaman</span> <span class="val">${rupiah(data.totalPinjam)}</span>
+                    </div>
+                    <div class="row-item">
+                        <span class="lbl">Total Terbayar</span> <span class="val text-success">${rupiah(data.totalBayar)}</span>
+                    </div>
+                    <div class="row-item" style="border-bottom:none; margin-top:5px; align-items:center;">
+                        <span class="lbl" style="color:#d32f2f;">SISA HUTANG</span> <span class="val val-red">${rupiah(data.sisaHutang)}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <h4 style="font-size:12px; text-transform:uppercase; border-bottom:2px solid #333; display:inline-block; margin-bottom:10px;">Rincian Pembayaran</h4>
+                <table class="tbl-rekap">
+                    <thead>
+                        <tr>
+                            <th style="width: 20%;">Tanggal</th>
+                            <th style="width: 50%;">Keterangan / Metode</th>
+                            <th style="width: 30%; text-align:right;">Nominal Bayar</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rowsHTML}
+                    </tbody>
+                    <tfoot style="border-top: 2px solid #333; font-weight:bold;">
+                        <tr>
+                            <td colspan="2" style="text-align:right; padding-top:10px;">TOTAL PEMBAYARAN MASUK</td>
+                            <td style="text-align:right; padding-top:10px; font-size:12px;">${rupiah(data.totalBayar)}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+
+            <div class="footer">
+                <div class="ttd-box">
+                    <small>Disetujui Oleh,</small>
+                    <div class="ttd-line">( Admin / HRD )</div>
+                </div>
+                <div class="ttd-box">
+                    <small>Penyetor / Karyawan,</small>
+                    <div class="ttd-line">( ${data.namaKaryawan} )</div>
+                </div>
+            </div>
+
+            <div class="timestamp">
+                Dicetak pada: ${new Date().toLocaleString('id-ID')}
+            </div>
+        </div>
+        <script>setTimeout(() => { window.print(); }, 1000);
+        ` + '</sc' + 'ript>' + `
+    </body>
+    </html>
+    `;
+    
+    win.document.write(htmlContent);
+    win.document.close();
+}
 // --- FUNGSI FORMAT RUPIAH SAAT MENGETIK ---
 function formatRupiahInput(input) {
   // 1. Hapus semua karakter selain angka
