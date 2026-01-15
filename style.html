@@ -477,4 +477,44 @@
       display: none !important;
   }
 }
+
+/* --- STYLE TAB MODERNA SDM --- */
+.card-header-tabs .nav-link {
+    border: none;
+    border-bottom: 3px solid transparent; /* Garis bawah transparan default */
+    color: #6c757d; /* Warna teks default abu */
+    font-weight: 600;
+    padding: 12px 20px;
+    background: transparent !important; /* Hapus background putih/merah aneh */
+    transition: all 0.3s;
+}
+
+.card-header-tabs .nav-link:hover {
+    color: var(--primary-red);
+    border-color: transparent;
+    background: #fff5f5 !important; /* Efek hover merah muda sangat tipis */
+}
+
+.card-header-tabs .nav-link.active {
+    color: var(--primary-red) !important; /* Warna teks aktif Merah */
+    background: transparent !important;
+    border-bottom: 3px solid var(--primary-red); /* Garis bawah merah tegas */
+}
+
+/* Tabel di dalam SDM */
+#tabel-karyawan thead th, #tabel-kasbon thead th {
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+}
+
+/* --- FIX MODAL TUMPUK (Z-INDEX) --- */
+/* Pastikan Global Modal (Alert/Confirm) selalu di atas modal lain */
+#globalModal {
+    z-index: 10000 !important; 
+}
+/* Backdrop (Layar gelap) untuk modal kedua juga harus di atas modal pertama */
+.modal-backdrop:nth-of-type(2) {
+    z-index: 9999 !important;
+}
 </style>
