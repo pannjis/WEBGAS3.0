@@ -903,16 +903,16 @@
 
                 <div class="table-responsive border rounded">
                     <table class="table table-custom table-hover align-middle mb-0" id="tabel-gaji-detail">
-                        <thead class="bg-light text-center">
-                            <tr>
-                                <th>Nama Karyawan</th>
-                                <th>Gaji Pokok</th>
-                                <th class="text-success">Bonus (+)</th>
-                                <th class="text-danger">Potongan Kasbon (-)</th>
-                                <th class="bg-primary text-white">Total THP</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
+                    <thead class="bg-light text-center">
+                        <tr>
+                            <th>Nama Karyawan</th>
+                            <th>Gaji Pokok</th>
+                            <th class="text-success">Bonus (+)</th>
+                            <th class="text-danger">Potongan (-)</th>
+                            <th class="bg-primary text-white">Total THP</th>
+                            <th>Status</th>
+                            <th>Aksi</th> </tr>
+                    </thead>
                         <tbody id="tbody-gaji">
                             <tr><td colspan="6" class="text-center py-5 text-muted">Pilih periode bulan terlebih dahulu.</td></tr>
                         </tbody>
@@ -1233,23 +1233,23 @@
     </div>
   </div>
 
-  <div class="modal fade" id="modalKaryawan" tabindex="-1">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5>Karyawan</h5><button class="btn-close" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body">
-          <input type="hidden" id="kry-id">
-          <input id="kry-nama" class="form-control mb-2" placeholder="Nama">
-          <input id="kry-hp" class="form-control mb-2" placeholder="HP">
-          <input id="kry-gaji" type="text" class="form-control mb-2" placeholder="Gaji Pokok" onkeyup="formatRupiahInput(this)">
-          <input id="kry-bonus" type="text" class="form-control mb-2" placeholder="Bonus" onkeyup="formatRupiahInput(this)">
-        </div>
-        <div class="modal-footer"><button onclick="simpanKaryawanDB()" class="btn btn-primary">Simpan</button></div>
-      </div>
-    </div>
-  </div>
+          <div class="modal fade" id="modalKaryawan" tabindex="-1">
+            <div class="modal-dialog">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <h5>Karyawan</h5><button class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                  <input type="hidden" id="kry-id">
+                  <input id="kry-nama" class="form-control mb-2" placeholder="Nama">
+                  <input id="kry-hp" class="form-control mb-2" placeholder="HP">
+                  <input id="kry-gaji" type="text" class="form-control mb-2" placeholder="Gaji Pokok" onkeyup="formatRupiahInput(this)">
+                  <input id="kry-bonus" type="text" class="form-control mb-2" placeholder="Bonus" onkeyup="formatRupiahInput(this)">
+                </div>
+                <div class="modal-footer"><button onclick="simpanKaryawanDB()" class="btn btn-primary">Simpan</button></div>
+              </div>
+            </div>
+          </div>
 
   <div class="modal fade" id="modalSupplier" tabindex="-1">
     <div class="modal-dialog">
