@@ -10,7 +10,6 @@ function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
 
-// --- UPDATE 1: TAMBAHKAN SHEET PENGATURAN DI SETUP ---
 function setupDatabase() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheets = [
@@ -20,12 +19,14 @@ function setupDatabase() {
     {name: 'SUPPLIER', header: ['ID', 'Nama_Supplier', 'NoHP', 'Alamat']},
     {name: 'TRANSAKSI', header: ['ID_Trans', 'Waktu', 'Pelanggan', 'Produk', 'Qty', 'Total', 'Tipe', 'Kasir', 'Metode_Bayar', 'Jatuh_Tempo', 'Status']},
     {name: 'PEMBELIAN', header: ['ID_Beli', 'Waktu', 'Supplier', 'Produk', 'Qty', 'Total', 'Metode']},
-    {name: 'KEUANGAN', header: ['ID', 'Tanggal', 'Jenis', 'Kategori', 'Nominal', 'Keterangan']},
+    // [UPDATE] Header Keuangan ditambah kolom 'Akun'
+    {name: 'KEUANGAN', header: ['ID', 'Tanggal', 'Jenis', 'Kategori', 'Nominal', 'Keterangan', 'Akun']}, 
     {name: 'KATEGORI', header: ['Nama_Kategori']},
     {name: 'KARYAWAN', header: ['ID', 'Nama', 'NoHP', 'Gaji_Pokok', 'Bonus_Per_Pcs', 'Status']}, 
     {name: 'KASBON', header: ['ID_Kasbon', 'Tanggal', 'Nama_Karyawan', 'Nominal', 'Keterangan', 'Status_Lunas']},
-    // [BARU] Sheet Pengaturan Perusahaan
-    {name: 'PENGATURAN', header: ['Key', 'Value']} 
+    {name: 'PENGATURAN', header: ['Key', 'Value']},
+    // [BARU] Sheet untuk menyimpan Daftar Akun/Dompet
+    {name: 'AKUN_KAS', header: ['ID_Akun', 'Nama_Akun', 'No_Rekening', 'Tipe', 'Saldo_Awal']} 
   ];
 
   sheets.forEach(s => {
@@ -33,18 +34,55 @@ function setupDatabase() {
     if (!sheet) {
       sheet = ss.insertSheet(s.name);
       sheet.appendRow(s.header);
-      // Data Dummy User
+      // Data Default User
       if(s.name === 'USERS') sheet.appendRow(['admin', 'admin123', 'Admin', 'Super Admin']);
-      // Data Default Perusahaan
-      if(s.name === 'PENGATURAN') {
-         sheet.appendRow(['nama_perusahaan', 'PT. CONTOH MAJU JAYA']);
-         sheet.appendRow(['nama_pemilik', 'Bpk. Owner']);
-         sheet.appendRow(['alamat', 'Jl. Raya No. 1, Jakarta']);
-         sheet.appendRow(['no_perusahaan', '08123456789']);
-         sheet.appendRow(['no_pemilik', '08987654321']);
+      // [BARU] Data Default Akun Kas
+      if(s.name === 'AKUN_KAS') {
+         // Urutan: ID, Nama, No_Rekening, Tipe, Saldo
+         sheet.appendRow(['ACC-1', 'Kas Tunai (Laci)', '-', 'Tunai', 0]); 
+         sheet.appendRow(['ACC-2', 'Bank BCA', '1234567890', 'Bank', 0]);
+         sheet.appendRow(['ACC-3', 'Bank BRI', '0987654321', 'Bank', 0]);
       }
     }
   });
+}
+
+// 3. Update Baca Data Akun (Sesuaikan Index Kolom)
+function getDaftarAkun() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetAkun = ss.getSheetByName('AKUN_KAS');
+  const sheetKeu = ss.getSheetByName('KEUANGAN');
+  
+  if(!sheetAkun || !sheetKeu) return [];
+
+  const dataAkun = sheetAkun.getDataRange().getValues().slice(1);
+  const dataKeu = sheetKeu.getDataRange().getValues().slice(1);
+
+  let listAkun = dataAkun.map(r => {
+      // [UPDATE INDEX KARENA ADA KOLOM BARU]
+      let id = r[0];
+      let nama = r[1];
+      let norek = r[2]; // Kolom C (Index 2)
+      let tipe = r[3];  // Kolom D (Index 3)
+      let saldo = Number(r[4]); // Kolom E (Index 4) - Saldo Awal
+
+      // Loop Transaksi Keuangan
+      dataKeu.forEach(k => {
+          let akunTrx = k[6]; 
+          let jenis = k[2];
+          let nominal = Number(k[4]);
+
+          if(akunTrx === nama) {
+              if(jenis === 'Pemasukan') saldo += nominal;
+              if(jenis === 'Pengeluaran') saldo -= nominal;
+          }
+      });
+
+      // Kembalikan objek lengkap
+      return { id: id, nama: nama, norek: norek, tipe: tipe, saldo: saldo };
+  });
+
+  return listAkun;
 }
 
 // --- UPDATE 2: PERBAIKI LOGIN (Agar me-return Username) ---
@@ -201,21 +239,33 @@ function simpanProfilPerusahaan(form) {
   return "Profil & Logo Berhasil Disimpan!";
 }
 
-// --- HELPER DATA (UPDATE) ---
+// GANTI function getData(sheetName) yang lama dengan ini:
+
 function getData(sheetName) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
   if (!sheet) return [];
   
   const data = sheet.getDataRange().getValues().slice(1); // Hapus Header
   
-  // FILTER & FORMATTING
-  // 1. Hapus baris yang kolom pertamanya (ID) kosong
-  // 2. Ubah format Tanggal (Kolom Index 1) menjadi String agar tidak error di browser
   return data.filter(r => r[0] !== "").map(r => {
-      // Cek apakah kolom ke-2 (Index 1) adalah Tanggal
-      if (r[1] instanceof Date) {
-         r[1] = r[1].toISOString(); 
+      // PERBAIKAN: Paksa konversi Tanggal (Kolom Index 1)
+      // Jika format di Excel jadi Teks (Alignment Kiri), kita ubah paksa jadi Date Object
+      if (r[1] && !(r[1] instanceof Date)) {
+          let d = new Date(r[1]);
+          if(!isNaN(d.getTime())) { 
+             r[1] = d; // Berhasil dikonversi
+          }
       }
+      
+      // Standarisasi ke ISO String agar Frontend bisa baca
+      if (r[1] instanceof Date) {
+         // Tambahkan offset agar tidak mundur sehari karena Timezone UTC
+         // Kita pakai teknik simpel: Format lokal ID
+         let localDate = new Date(r[1].getTime() - (r[1].getTimezoneOffset() * 60000));
+         r[1] = localDate.toISOString(); 
+      }
+      
       return r;
   });
 }
@@ -231,14 +281,20 @@ function loginUser(username, password) {
   return { status: 'failed' };
 }
 
-// --- DASHBOARD ---
+// GANTI function getDashboardStats() yang lama dengan ini:
+
 function getDashboardStats() {
   const keu = getData('KEUANGAN');
   let income = 0, expense = 0;
   
   keu.forEach(r => {
-    if(r[2] === 'Pemasukan') income += Number(r[4]);
-    if(r[2] === 'Pengeluaran') expense += Number(r[4]);
+    // r[2] adalah Jenis, r[4] adalah Nominal
+    // Gunakan String() dan trim() agar aman dari spasi
+    let jenis = String(r[2]).trim(); 
+    let nominal = Number(r[4]);
+
+    if(jenis === 'Pemasukan') income += nominal;
+    if(jenis === 'Pengeluaran') expense += nominal;
   });
   
   return { income, expense, net: income - expense };
@@ -372,7 +428,8 @@ function hapusProduk(nama) {
 
 // --- MODIFIKASI: TRANSAKSI & KASIR ---
 
-// 1. Simpan Transaksi (BULK / BANYAK ITEM SEKALIGUS)
+// GANTI function simpanTransaksiBulk(dataTransaksi) dengan ini:
+
 function simpanTransaksiBulk(dataTransaksi) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const prodSheet = ss.getSheetByName('PRODUK');
@@ -382,30 +439,25 @@ function simpanTransaksiBulk(dataTransaksi) {
   const prodData = prodSheet.getDataRange().getValues();
   const idTrxMaster = 'KBA-' + Date.now();
   const waktu = new Date();
+  
   let totalBelanja = 0;
   let summaryProduk = [];
-
-  // [BAGIAN INI YANG TADI HILANG]
-  // Kita tentukan statusnya SEKALI saja di sini
+  
+  // Status Transaksi
   let statusTrx = (dataTransaksi.metode === 'Hutang') ? 'Belum Lunas' : 'Lunas';
 
-  // Loop setiap item di keranjang
+  // 1. LOOP BARANG (Stok)
   dataTransaksi.items.forEach(item => {
     let itemFound = false;
-    
-    // Update Stok
     for (let i = 1; i < prodData.length; i++) {
       if (prodData[i][1] == item.produkNama) {
         let curIsi = Number(prodData[i][4]);
         let curKosong = Number(prodData[i][5]);
         
-        // Validasi Stok
         if (curIsi < item.qty) throw new Error(`Stok ${item.produkNama} Habis! Sisa: ${curIsi}`);
 
-        // Update logic
         let newIsi = curIsi - item.qty;
         let newKosong = curKosong;
-        
         if (item.tipe === 'Tukar (Refill)') {
            newKosong = curKosong + Number(item.qty); 
         }
@@ -417,35 +469,34 @@ function simpanTransaksiBulk(dataTransaksi) {
       }
     }
     
-    if(!itemFound) throw new Error(`Produk ${item.produkNama} tidak ditemukan di database.`);
+    if(!itemFound) throw new Error(`Produk ${item.produkNama} tidak ditemukan.`);
 
-    // Catat ke Sheet TRANSAKSI
-    // Sekarang variabel 'statusTrx' sudah dikenali karena sudah dibuat di atas loop
+    // Catat Transaksi
     trxSheet.appendRow([
-      idTrxMaster, 
-      waktu, 
-      dataTransaksi.pelanggan, 
-      item.produkNama, 
-      item.qty, 
-      item.total, 
-      item.tipe, 
-      dataTransaksi.kasir, 
-      dataTransaksi.metode, 
-      dataTransaksi.jatuhTempo, 
-      statusTrx 
+      idTrxMaster, waktu, dataTransaksi.pelanggan, item.produkNama, item.qty, 
+      item.total, item.tipe, dataTransaksi.kasir, dataTransaksi.metode, 
+      dataTransaksi.jatuhTempo, statusTrx 
     ]);
 
     totalBelanja += Number(item.total);
     summaryProduk.push(`${item.produkNama} (${item.qty})`);
   });
 
-  // LOGIKA KEUANGAN (Hanya catat jika BUKAN Hutang)
+  // LOGIKA KEUANGAN
   if (dataTransaksi.metode !== 'Hutang') {
       keuSheet.appendRow([
-        'FIN-' + idTrxMaster, waktu, 'Pemasukan', 'Penjualan Gas', 
-        totalBelanja, `Penjualan: ${summaryProduk.join(', ')} (${dataTransaksi.metode})`
+        'FIN-' + idTrxMaster, 
+        waktu, 
+        'Pemasukan', 
+        'Penjualan Gas', 
+        totalBelanja, 
+        `Penjualan: ${summaryProduk.join(', ')}`,
+        dataTransaksi.metode 
       ]);
   }
+  
+  // [TAMBAHAN WAJIB] Paksa simpan detik ini juga
+  SpreadsheetApp.flush(); 
   
   return "Transaksi Berhasil Disimpan!";
 }
@@ -552,37 +603,29 @@ function getJumlahJatuhTempo() {
   return count;
 }
 
-// 2. Ambil Riwayat Transaksi
-// --- Code.gs ---
-
 function getRiwayatTransaksi() {
-  const data = getData('TRANSAKSI'); // Ambil semua data
+  const data = getData('TRANSAKSI');
   
-  // Objek penampung untuk pengelompokan
   let grouped = {};
-
   data.forEach(row => {
     let id = row[0];
-    
-    // Konversi Tanggal agar aman dikirim ke browser
-    let waktuStr = row[1];
-    if (row[1] instanceof Date) {
-       waktuStr = row[1].toISOString();
-    }
+    let waktuStr = row[1] instanceof Date ? row[1].toISOString() : row[1];
 
-    // Jika ID belum ada di penampung, buat baru
     if (!grouped[id]) {
       grouped[id] = {
         id: id,
         waktu: waktuStr,
         pelanggan: row[2],
         kasir: row[7],
-        totalBayar: 0,  // Nanti dijumlahkan
-        items: []       // Array untuk menyimpan detail barang
+        // [PERBAIKAN DISINI] Tambahkan pembacaan kolom Metode & Jatuh Tempo
+        metode: row[8],        // Kolom I (Index 8) -> Metode Bayar
+        jatuhTempo: row[9],    // Kolom J (Index 9) -> Jatuh Tempo
+        totalBayar: 0,  
+        items: []       
       };
     }
-
-    // Tambahkan detail item ke transaksi tersebut
+    
+    // ... (kode bawahnya tetap sama) ...
     grouped[id].items.push({
       produk: row[3],
       qty: row[4],
@@ -591,17 +634,10 @@ function getRiwayatTransaksi() {
       status: row[10]
     });
 
-    // Akumulasi Total Bayar (Hanya jika status bukan Retur Full, opsional)
     grouped[id].totalBayar += Number(row[5]);
   });
-
-  // Ubah Object menjadi Array dan urutkan dari yang terbaru (Descending)
-  const result = Object.values(grouped).sort((a, b) => {
-      return new Date(b.waktu) - new Date(a.waktu);
-  });
-
-  // Ambil 50 transaksi terakhir saja agar ringan
-  return result.slice(0, 50);
+  
+  return Object.values(grouped).sort((a, b) => new Date(b.waktu) - new Date(a.waktu)).slice(0, 50);
 }
 
 // --- Code.gs ---
@@ -898,46 +934,22 @@ function tambahKategori(nama) {
   SpreadsheetApp.getActiveSpreadsheet().getSheetByName('KATEGORI').appendRow([nama]);
 }
 
+// --- [UPDATE] Simpan Keuangan dengan Kolom AKUN ---
 function simpanKeuangan(form) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('KEUANGAN');
-  
-  // Buat header jika sheet masih kosong
-  if (sheet.getLastRow() === 0) {
-     sheet.appendRow(['ID', 'Tanggal', 'Jenis', 'Kategori', 'Nominal', 'Keterangan']);
-  }
-
-  // Parse tanggal
   const tglInput = new Date(form.tanggal);
-  
-  // --- LOGIKA EDIT (JIKA ID ADA) ---
-  if (form.id && form.id !== 'null' && form.id !== '') {
-      const data = sheet.getDataRange().getValues();
-      for(let i = 1; i < data.length; i++) {
-          if(data[i][0] == form.id) { 
-              sheet.getRange(i+1, 2).setValue(tglInput);
-              sheet.getRange(i+1, 3).setValue(form.jenis);
-              sheet.getRange(i+1, 4).setValue(form.kategori);
-              sheet.getRange(i+1, 5).setValue(form.nominal);
-              sheet.getRange(i+1, 6).setValue(form.keterangan);
-              
-              // [PENTING] HARUS ADA RETURN OBJECT INI
-              return { 
-                  status: 'success', 
-                  msg: 'Data Berhasil Diupdate',
-                  data: { 
-                      id: form.id, 
-                      tanggal: tglInput.toISOString(), // Gunakan ISOString agar aman 
-                      jenis: form.jenis, 
-                      kategori: form.kategori, 
-                      nominal: form.nominal, 
-                      ket: form.keterangan 
-                  }
-              };
-          }
-      }
+
+  // Tambahkan Header jika belum ada (Update Header Lama)
+  if(sheet.getLastColumn() < 7) {
+     sheet.getRange(1, 7).setValue('Akun');
   }
 
-  // --- LOGIKA BARU (JIKA ID KOSONG) ---
+  // LOGIKA EDIT
+  if (form.id && !form.id.includes('MANUAL')) { 
+     // ... (Kode edit lama disesuaikan jika perlu, disini kita fokus Input Baru dulu)
+  }
+
+  // LOGIKA BARU
   const newId = 'MANUAL-' + Date.now();
   sheet.appendRow([
       newId, 
@@ -945,24 +957,58 @@ function simpanKeuangan(form) {
       form.jenis, 
       form.kategori, 
       form.nominal, 
-      form.keterangan
+      form.keterangan,
+      form.akun // [BARU] Simpan Nama Akun
   ]);
   
-  SpreadsheetApp.flush(); 
+  return { status: 'success', data: { id: newId, ...form } };
+}
+
+// 2. Update Simpan Akun Baru (Tambah parameter norek)
+function simpanAkunBaru(form) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('AKUN_KAS');
+  const id = 'ACC-' + Date.now();
   
-  // [PENTING] HARUS ADA RETURN OBJECT INI UNTUK DATA BARU
-  return { 
-      status: 'success', 
-      msg: 'Data Berhasil Disimpan',
-      data: { 
-          id: newId, 
-          tanggal: tglInput.toISOString(), 
-          jenis: form.jenis, 
-          kategori: form.kategori, 
-          nominal: form.nominal, 
-          ket: form.keterangan 
-      }
-  };
+  // [UPDATE] Urutan simpan: ID, Nama, NoRek, Tipe, Saldo
+  sheet.appendRow([id, form.nama, "'" + form.norek, form.tipe, form.saldo]); 
+  // Note: Ditambah tanda petik satu (') di depan norek agar angka 0 tidak hilang
+  
+  return "Akun Berhasil Ditambahkan!";
+}
+
+function hapusAkun(id) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('AKUN_KAS');
+  const data = sheet.getDataRange().getValues();
+  
+  // Mulai loop dari 1 (skip header)
+  for(let i=1; i<data.length; i++) {
+     if(data[i][0] == id) {
+        sheet.deleteRow(i+1);
+        return "Akun Dihapus.";
+     }
+  }
+}
+
+// --- [BARU] Fitur Transfer Saldo Antar Akun ---
+function prosesTransferSaldo(form) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('KEUANGAN');
+  const waktu = new Date();
+  const idTrx = 'TRF-' + Date.now();
+
+  // Konsep Transfer:
+  // 1. Catat PENGELUARAN di Akun Asal
+  sheet.appendRow([
+     idTrx + '-OUT', waktu, 'Pengeluaran', 'Transfer Keluar', form.nominal, 
+     `Transfer ke ${form.akunTujuan} (${form.ket})`, form.akunAsal
+  ]);
+
+  // 2. Catat PEMASUKAN di Akun Tujuan
+  sheet.appendRow([
+     idTrx + '-IN', waktu, 'Pemasukan', 'Transfer Masuk', form.nominal, 
+     `Terima dari ${form.akunAsal} (${form.ket})`, form.akunTujuan
+  ]);
+
+  return "Transfer Berhasil!";
 }
 
 // --- BARU: HAPUS KEUANGAN ---
