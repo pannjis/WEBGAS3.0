@@ -5,6 +5,7 @@
   let globalListSupplier = [];
   let globalKeuanganData = [];
   let globalListAkun = [];
+  let dataGajiPreview = [];
   let payrollDataTemp = [];
   let keranjangBelanja = [];
   let globalRiwayatData = [];
@@ -313,6 +314,12 @@ function showPage(pageId) {
     if(pageId === 'edit-produk') {
        // Opsional: Jika user refresh saat di halaman edit, kembalikan ke produk
        // showPage('produk'); 
+    }
+
+    // --- PERBAIKAN: Load data karyawan saat menu Payroll dibuka ---
+    if(pageId === 'payroll') {
+        loadKaryawan(); 
+        loadKasbon(); // Opsional: sekalian load kasbon biar siap
     }
 }
 
@@ -2737,13 +2744,23 @@ document.getElementById('input-kategori-baru-val').addEventListener("keypress", 
   }
 });
 
-  // --- PAYROLL (TABS) ---
-  function switchTab(t) {
-    document.querySelectorAll('.tab-content').forEach(e=>e.classList.add('d-none')); document.getElementById('tab-'+t).classList.remove('d-none');
-    document.querySelectorAll('#payrollTabs .nav-link').forEach(e=>e.classList.remove('active')); event.target.classList.add('active');
-    if(t==='karyawan') loadKaryawan();
-    if(t==='kasbon') loadKasbon();
-  }
+function switchTab(tabId, el) {
+    document.querySelectorAll('.tab-content-item').forEach(d => d.classList.add('d-none'));
+    document.getElementById('tab-' + tabId).classList.remove('d-none');
+
+    document.querySelectorAll('#payrollTabs .nav-link').forEach(l => {
+        l.classList.remove('active', 'text-primary');
+        l.classList.add('text-muted');
+    });
+    if(el) {
+        el.classList.add('active', 'text-primary');
+        el.classList.remove('text-muted');
+    }
+
+    if(tabId === 'karyawan') loadKaryawan();
+    if(tabId === 'kasbon') loadKasbon();
+    if(tabId === 'penggajian') initPenggajian();
+}
 
   function loadKaryawan() {
     google.script.run.withSuccessHandler(d => {
@@ -2755,22 +2772,466 @@ document.getElementById('input-kategori-baru-val').addEventListener("keypress", 
       });
     }).getData('KARYAWAN');
   }
-  function modalKaryawan() { document.getElementById('kry-id').value=''; new bootstrap.Modal(document.getElementById('modalKaryawan')).show(); }
-  function simpanKaryawanDB() {
-    const d = { id: document.getElementById('kry-id').value, nama: document.getElementById('kry-nama').value, hp: document.getElementById('kry-hp').value, gaji: document.getElementById('kry-gaji').value, bonus: document.getElementById('kry-bonus').value };
-    google.script.run.withSuccessHandler(()=>{ bootstrap.Modal.getInstance(document.getElementById('modalKaryawan')).hide(); loadKaryawan(); }).simpanKaryawan(d);
+
+  // Cari fungsi modalKaryawan() di javascript.html dan GANTI dengan ini:
+  function modalKaryawan() { 
+      // Reset semua field agar bersih saat dibuka
+      document.getElementById('kry-id').value = '';
+      document.getElementById('kry-nama').value = '';
+      document.getElementById('kry-hp').value = '';
+      document.getElementById('kry-gaji').value = '';
+      document.getElementById('kry-bonus').value = '';
+      
+      // Tampilkan Modal
+      new bootstrap.Modal(document.getElementById('modalKaryawan')).show(); 
   }
+
+// Cari fungsi simpanKaryawanDB() di javascript.html dan GANTI dengan ini:
+function simpanKaryawanDB() {
+    // 1. Ambil Data dari Form
+    const d = { 
+        id: document.getElementById('kry-id').value, 
+        nama: document.getElementById('kry-nama').value, 
+        hp: document.getElementById('kry-hp').value, 
+        gaji: document.getElementById('kry-gaji').value, 
+        bonus: document.getElementById('kry-bonus').value 
+    };
+
+    // 2. Validasi (Cegah nama kosong)
+    if(!d.nama) return myAlert('Error', 'Nama karyawan wajib diisi!', 'warning');
+
+    // 3. Tampilkan Loading
+    loading(true);
+
+    // 4. Kirim ke Server (Code.gs)
+    google.script.run
+        .withSuccessHandler((res) => {
+            // Matikan Loading
+            loading(false); 
+            
+            // Tutup Modal
+            const modalEl = document.getElementById('modalKaryawan');
+            const modalInstance = bootstrap.Modal.getInstance(modalEl);
+            if(modalInstance) modalInstance.hide();
+            
+            // Refresh Tabel Karyawan
+            loadKaryawan(); 
+            
+            // Tampilkan Popup Sukses
+            myAlert('Berhasil', res, 'success');
+
+            // Reset Form (Agar data lama hilang)
+            document.getElementById('kry-id').value = '';
+            document.getElementById('kry-nama').value = '';
+            document.getElementById('kry-hp').value = '';
+            document.getElementById('kry-gaji').value = '';
+            document.getElementById('kry-bonus').value = '';
+        })
+        .withFailureHandler((err) => {
+            loading(false);
+            myAlert('Gagal', err.message, 'error');
+        })
+        .simpanKaryawan(d);
+}
   function hapusKaryawan(id) { if(confirm('Hapus?')) google.script.run.withSuccessHandler(loadKaryawan).hapusKaryawan(id); }
 
-  function loadKasbon() {
-    google.script.run.withSuccessHandler(d => {
-      const tb = document.querySelector('#tabel-kasbon tbody'); tb.innerHTML='';
-      d.filter(x=>x[5]==='Belum Lunas').forEach(r => tb.innerHTML+=`<tr><td>${new Date(r[1]).toLocaleDateString()}</td><td>${r[2]}</td><td class="text-danger">${rupiah(r[3])}</td></tr>`);
-    }).getData('KASBON');
-  }
-  function simpanKasbon() {
-    google.script.run.withSuccessHandler(()=>{ alert('Kasbon OK'); loadKasbon(); }).simpanKasbon({nama:document.getElementById('kasbon-nama').value, nominal:document.getElementById('kasbon-nominal').value, ket:document.getElementById('kasbon-ket').value});
-  }
+// 1. UPDATE FUNGSI LOAD KASBON (Tambah Tombol Detail)
+function loadKasbon() {
+    const filter = document.getElementById('filter-status-kasbon').value;
+    const tb = document.querySelector('#tabel-kasbon tbody');
+    tb.innerHTML = '<tr><td colspan="5" class="text-center">Loading...</td></tr>';
+
+    google.script.run.withSuccessHandler(data => {
+        tb.innerHTML = '';
+        let filtered = data;
+        if(filter !== 'Semua') {
+            filtered = data.filter(x => String(x[5]).includes(filter));
+        }
+
+        if(filtered.length === 0) {
+            tb.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Tidak ada data.</td></tr>';
+            return;
+        }
+
+        filtered.forEach(r => {
+            // r[0]:ID, r[2]:Nama, r[3]:Total, r[6]:SudahBayar, r[8]:Angsuran
+            let tgl = new Date(r[1]).toLocaleDateString('id-ID');
+            let sudahBayar = Number(r[6]) || 0;
+            let sisa = Number(r[3]) - sudahBayar;
+            let statusBadge = r[5].includes('Belum') 
+                ? '<span class="badge bg-danger">Belum Lunas</span>' 
+                : '<span class="badge bg-success">Lunas</span>';
+
+            tb.innerHTML += `
+                <tr>
+                    <td>${tgl}</td>
+                    <td class="fw-bold">${r[2]}</td>
+                    <td>
+                        <div class="fw-bold">${rupiah(r[3])}</div>
+                        <small class="text-muted">Sisa: <span class="text-danger fw-bold">${rupiah(sisa)}</span></small>
+                    </td>
+                    <td>${rupiah(r[8])}<small>/bln</small></td>
+                    <td>
+                        ${statusBadge}
+                        <button class="btn btn-sm btn-outline-dark rounded-pill px-3 mt-1 d-block" onclick="bukaModalBayarKasbon('${r[0]}', '${r[2]}', ${r[3]}, ${sudahBayar})">
+                            Detail / Bayar
+                        </button>
+                    </td>
+                </tr>
+            `;
+        });
+    }).getDataKasbonFull();
+}
+
+// 2. BUKA MODAL DETAIL & LOAD HISTORY
+function bukaModalBayarKasbon(id, nama, total, sudah) {
+    let sisa = total - sudah;
+    
+    // Isi Summary
+    document.getElementById('det-kasbon-id').value = id;
+    document.getElementById('det-kasbon-nama').innerText = nama;
+    document.getElementById('det-kasbon-total').innerText = rupiah(total);
+    document.getElementById('det-kasbon-sudah').innerText = rupiah(sudah);
+    document.getElementById('det-kasbon-sisa').innerText = rupiah(sisa);
+    document.getElementById('input-bayar-cicilan').value = '';
+
+    // Hide form jika sudah lunas
+    if(sisa <= 0) {
+        document.getElementById('form-bayar-manual-area').classList.add('d-none');
+    } else {
+        document.getElementById('form-bayar-manual-area').classList.remove('d-none');
+    }
+
+    // Load Tabel History
+    const tbHistory = document.querySelector('#tabel-history-cicilan tbody');
+    tbHistory.innerHTML = '<tr><td colspan="4" class="text-center">Memuat riwayat...</td></tr>'; // colspan jadi 4
+    
+    new bootstrap.Modal(document.getElementById('modalDetailKasbon')).show();
+
+    // --- BAGIAN INI YANG DI-UPDATE ---
+    google.script.run.withSuccessHandler(hist => {
+        tbHistory.innerHTML = '';
+        
+        // FIX: Cek jika hist itu null, undefined, atau kosong
+        if(!hist || hist.length === 0) {
+            tbHistory.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">Belum ada riwayat pembayaran.</td></tr>';
+            return;
+        }
+
+        // Ambil info sisa hutang terakhir dari modal
+        const currentSisaStr = document.getElementById('det-kasbon-sisa').innerText;
+        const currentSisa = Number(currentSisaStr.replace(/[^0-9,-]+/g,""));
+
+        hist.forEach(h => {
+            let tgl = new Date(h.tanggal).toLocaleDateString('id-ID');
+            
+            // Perbaiki tampilan Badge agar lebih rapi
+            let badgeTipe = h.tipe.includes('Manual') 
+                ? '<span class="badge bg-success bg-opacity-10 text-success border border-success">Manual (Tunai)</span>'
+                : '<span class="badge bg-warning bg-opacity-10 text-dark border border-warning">Potong Gaji</span>';
+            
+            const printData = JSON.stringify({
+                idKasbon: id, 
+                nama: nama,
+                tanggal: tgl,
+                nominal: h.nominal,
+                tipe: h.tipe,
+                ket: h.ket,
+                sisa: currentSisa 
+            }).replace(/"/g, "&quot;");
+
+            tbHistory.innerHTML += `
+                <tr>
+                    <td>${tgl}</td>
+                    <td>
+                        ${badgeTipe}<br> 
+                        <small class="text-muted d-block text-truncate" style="max-width:200px; font-size:11px">"${h.ket}"</small>
+                    </td>
+                    <td class="text-end fw-bold text-dark">${rupiah(h.nominal)}</td>
+                    <td class="text-center">
+                        <button class="btn btn-sm btn-outline-dark rounded-circle p-1 shadow-sm" onclick="cetakSlipKasbon(${printData})" title="Cetak Bukti">
+                            <i class="material-icons" style="font-size:16px">print</i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        });
+    }).getDetailHistoryKasbon(id);
+}
+
+// GANTI fungsi prosesBayarCicilanManual yang lama dengan ini:
+function prosesBayarCicilanManual() {
+    const id = document.getElementById('det-kasbon-id').value;
+    const nama = document.getElementById('det-kasbon-nama').innerText; // Ambil nama dari modal
+    const nominal = document.getElementById('input-bayar-cicilan').value;
+
+    if(!nominal || nominal <= 0) return myAlert('Error', 'Nominal tidak valid', 'warning');
+
+    myConfirm('Bayar Kasbon', `Terima pembayaran cicilan sebesar ${rupiah(nominal)}?`, () => {
+        loading(true);
+        google.script.run.withSuccessHandler(res => {
+            loading(false);
+            
+            // 1. Tampilkan Sukses
+            myAlert('Sukses', res, 'success');
+            bootstrap.Modal.getInstance(document.getElementById('modalDetailKasbon')).hide();
+            
+            // 2. Refresh Tabel Utama
+            loadKasbon(); 
+
+            // 3. CETAK SLIP OTOMATIS
+            // Hitung sisa baru (Sisa Lama - Bayar Baru)
+            const sisaLamaStr = document.getElementById('det-kasbon-sisa').innerText;
+            const sisaLama = Number(sisaLamaStr.replace(/[^0-9,-]+/g,""));
+            const sisaBaru = sisaLama - nominal;
+
+            cetakSlipKasbon({
+                idKasbon: id,
+                nama: nama,
+                tanggal: new Date().toLocaleDateString('id-ID'),
+                nominal: nominal,
+                tipe: 'Manual (Tunai)',
+                ket: 'Pembayaran Cicilan Manual',
+                sisa: sisaBaru
+            });
+
+        }).withFailureHandler(err => {
+            loading(false);
+            myAlert('Gagal', err.message, 'error');
+        }).bayarCicilanManual({ idKasbon: id, nominal: nominal });
+    });
+}
+function initPenggajian() {
+    // Set default bulan ini
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const picker = document.getElementById('filter-periode-gaji');
+    
+    if(!picker.value) {
+        picker.value = `${yyyy}-${mm}`;
+        cekDataGaji(); // Auto load
+    }
+}
+
+function cekDataGaji() {
+    const periode = document.getElementById('filter-periode-gaji').value;
+    if(!periode) return;
+
+    const btnArea = document.getElementById('btn-area-gaji');
+    const msg = document.getElementById('status-periode-msg');
+    const tbody = document.getElementById('tbody-gaji');
+
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center">Memeriksa data...</td></tr>';
+    btnArea.innerHTML = '';
+
+    google.script.run.withSuccessHandler(data => {
+        if(data.length > 0) {
+            // KASUS 1: DATA SUDAH ADA (HISTORY)
+            msg.innerHTML = `<span class="text-success fw-bold"><i class="material-icons align-middle" style="font-size:14px">check_circle</i> Data Gaji Periode ${periode} Sudah Dibayar.</span>`;
+            
+            // Render Tabel History
+            tbody.innerHTML = '';
+            let totalAll = 0;
+            data.forEach(row => {
+                totalAll += Number(row.total);
+                tbody.innerHTML += `
+                    <tr>
+                        <td class="fw-bold">${row.nama}</td>
+                        <td>${rupiah(row.gaji)}</td>
+                        <td class="text-success">${rupiah(row.bonus)}</td>
+                        <td class="text-danger">${rupiah(row.kasbon)}</td>
+                        <td class="fw-bold bg-primary-subtle text-primary">${rupiah(row.total)}</td>
+                        <td><span class="badge bg-success">SUDAH DIBAYAR</span></td>
+                    </tr>
+                `;
+            });
+
+            // Tombol Print
+            btnArea.innerHTML = `
+                <button class="btn btn-outline-dark rounded-pill fw-bold" onclick="printLaporanPDF('tabel-gaji-detail', 'Slip Gaji ${periode}')">
+                    <i class="material-icons align-middle">print</i> Cetak Laporan
+                </button>
+            `;
+
+        } else {
+            // KASUS 2: DATA BELUM ADA (GENERATE BARU)
+            msg.innerHTML = `<span class="text-warning fw-bold"><i class="material-icons align-middle" style="font-size:14px">warning</i> Data Gaji Periode ${periode} Belum Ada.</span>`;
+            
+            // Load Preview Hitungan Gaji
+            loadPreviewHitungGaji(periode);
+        }
+    }).getRiwayatGajiByPeriode(periode);
+}
+
+// --- 4. UPDATE LOAD PREVIEW GAJI (Agar input box terisi otomatis) ---
+// Ganti fungsi loadPreviewHitungGaji yang lama dengan yang ini
+function loadPreviewHitungGaji(periode) {
+    const tbody = document.getElementById('tbody-gaji');
+    const btnArea = document.getElementById('btn-area-gaji');
+
+    google.script.run.withSuccessHandler(data => {
+        dataGajiPreview = data; 
+        tbody.innerHTML = '';
+        
+        if(data.length === 0) {
+             tbody.innerHTML = '<tr><td colspan="6" class="text-center">Tidak ada karyawan aktif.</td></tr>';
+             return;
+        }
+
+        data.forEach((p, index) => {
+            let inputKasbonHTML = '';
+            let infoSisa = '';
+
+            // Jika ada hutang
+            if(p.sisaHutang > 0) {
+                infoSisa = `<br><small class="text-danger fw-bold" style="font-size:10px;">Sisa Hutang: ${rupiah(p.sisaHutang)}</small>`;
+                
+                // --- DISINI PERUBAHANNYA ---
+                // Value input otomatis terisi p.kasbonPotongan (Hasil hitungan cicilan)
+                inputKasbonHTML = `
+                    <div class="input-group input-group-sm" style="width: 130px;">
+                        <input type="number" class="form-control border-danger text-danger fw-bold input-potongan-gaji" 
+                               data-index="${index}" 
+                               value="${p.kasbonPotongan}" 
+                               max="${p.sisaHutang}"
+                               onkeyup="hitungUlangBaris(${index})"
+                               placeholder="0">
+                    </div>
+                `;
+            } else {
+                inputKasbonHTML = `<input type="hidden" class="input-potongan-gaji" data-index="${index}" value="0"><span class="text-muted">-</span>`;
+            }
+
+            let inputBonusHTML = `
+                 <input type="number" class="form-control form-control-sm border-success text-success fw-bold input-bonus-gaji"
+                        style="width: 100px;"
+                        data-index="${index}"
+                        value="${p.bonus}"
+                        onkeyup="hitungUlangBaris(${index})">
+            `;
+
+            // Hitung total awal tampilan
+            let totalAwal = p.gaji + p.bonus - p.kasbonPotongan;
+
+            tbody.innerHTML += `
+                <tr id="row-gaji-${index}">
+                    <td class="fw-bold">
+                        ${p.nama}
+                        ${infoSisa}
+                    </td>
+                    <td>
+                        <input type="hidden" class="val-gaji" value="${p.gaji}">
+                        ${rupiah(p.gaji)}
+                    </td>
+                    <td>${inputBonusHTML}</td>
+                    <td>${inputKasbonHTML}</td>
+                    <td class="fw-bold fs-6 text-primary val-thp">
+                        ${rupiah(totalAwal)}
+                    </td>
+                    <td><span class="badge bg-secondary">DRAFT</span></td>
+                </tr>
+            `;
+        });
+
+        btnArea.innerHTML = `
+            <button class="btn btn-primary rounded-pill fw-bold shadow px-4" onclick="prosesSimpanGaji('${periode}')">
+                <i class="material-icons align-middle">save</i> PROSES & CAIRKAN GAJI
+            </button>
+        `;
+
+    }).getDataPayroll(); 
+}
+
+// --- HITUNG ULANG OTOMATIS SAAT DIKETIK ---
+function hitungUlangBaris(index) {
+    // Ambil elemen di baris tersebut
+    const row = document.getElementById(`row-gaji-${index}`);
+    const gaji = Number(row.querySelector('.val-gaji').value);
+    
+    // Ambil nilai inputan user
+    const elBonus = row.querySelector('.input-bonus-gaji');
+    const elPotongan = row.querySelector('.input-potongan-gaji');
+    
+    let bonus = Number(elBonus.value) || 0;
+    let potongan = Number(elPotongan.value) || 0;
+
+    // Hitung Total Baru
+    let totalBaru = gaji + bonus - potongan;
+
+    // Update Tampilan Total
+    row.querySelector('.val-thp').innerText = rupiah(totalBaru);
+}
+
+// --- SIMPAN DATA (AMBIL NILAI DARI INPUT) ---
+function prosesSimpanGaji(periode) {
+    // Kita harus ambil nilai terbaru dari Input (karena user mungkin mengubahnya)
+    let finalData = [];
+    
+    // Loop data awal untuk mengambil referensi nama & id
+    dataGajiPreview.forEach((p, index) => {
+        const row = document.getElementById(`row-gaji-${index}`);
+        const bonusVal = Number(row.querySelector('.input-bonus-gaji').value) || 0;
+        const potonganVal = Number(row.querySelector('.input-potongan-gaji').value) || 0;
+        
+        finalData.push({
+            nama: p.nama,
+            gaji: p.gaji,
+            bonus: bonusVal,          // Bonus hasil edit
+            potonganManual: potonganVal, // Potongan hasil edit
+            total: p.gaji + bonusVal - potonganVal
+        });
+    });
+
+    myConfirm('Konfirmasi Payroll', `Simpan dan cairkan gaji untuk periode ${periode}?`, () => {
+        loading(true);
+        google.script.run.withSuccessHandler(res => {
+            loading(false);
+            myAlert('Sukses', res, 'success');
+            cekDataGaji(); 
+            loadDashboard(); 
+        }).simpanGajiBulanan(periode, finalData); // Kirim data yang sudah diedit
+    });
+}
+
+// --- 1. FUNGSI HITUNG CICILAN REALTIME ---
+function hitungCicilan() {
+    const nominal = Number(document.getElementById('kasbon-nominal').value) || 0;
+    const tenor = Number(document.getElementById('kasbon-tenor').value) || 1;
+    
+    // Cegah error bagi 0
+    let finalTenor = tenor < 1 ? 1 : tenor;
+    
+    let angsuran = Math.ceil(nominal / finalTenor);
+    
+    document.getElementById('kasbon-estimasi').value = rupiah(angsuran);
+}
+
+// --- 2. UPDATE SIMPAN KASBON ---
+function simpanKasbon() {
+    const data = {
+        nama: document.getElementById('kasbon-nama').value,
+        nominal: document.getElementById('kasbon-nominal').value,
+        tenor: document.getElementById('kasbon-tenor').value, // Kirim Tenor
+        ket: document.getElementById('kasbon-ket').value
+    };
+
+    if(!data.nominal || data.nominal <= 0) return myAlert('Error', 'Nominal harus diisi', 'warning');
+
+    loading(true);
+    google.script.run.withSuccessHandler(res => {
+        loading(false);
+        myAlert('Sukses', res, 'success');
+        
+        // Reset Form
+        document.getElementById('kasbon-nominal').value = '';
+        document.getElementById('kasbon-tenor').value = '1';
+        document.getElementById('kasbon-estimasi').value = 'Rp 0';
+        document.getElementById('kasbon-ket').value = '';
+        
+        loadKasbon(); // Refresh Tabel
+    }).simpanKasbon(data);
+}
 
   function loadHitungGaji() {
     document.querySelector('#tabel-hitung-gaji tbody').innerHTML='Loading...';
@@ -3717,6 +4178,147 @@ function cetakNotaKeuangan(data) {
 
         <script>
             setTimeout(() => { window.print(); }, 800);
+        ` + '</sc' + 'ript>' + `
+    </body>
+    </html>
+    `;
+    
+    win.document.write(htmlContent);
+    win.document.close();
+}
+
+// --- FUNGSI CETAK SLIP KASBON ---
+function cetakSlipKasbon(data) {
+    // 1. Ambil Profil Perusahaan Global
+    const namaPT = globalCompanyProfile.nama_perusahaan || 'NAMA PERUSAHAAN';
+    const alamatPT = globalCompanyProfile.alamat || '-';
+    const noPT = globalCompanyProfile.no_perusahaan || '-';
+    const logoUrl = globalCompanyProfile.logo_perusahaan || '';
+    
+    let htmlLogo = '';
+    if (logoUrl) {
+        htmlLogo = `<img src="${logoUrl}" style="height: 50px; width: auto; margin-right: 15px;">`;
+    }
+
+    // 2. Setup Warna & Judul
+    let warna = data.tipe.includes('Manual') ? '#198754' : '#dc3545'; // Hijau (Tunai), Merah (Gaji)
+    let judul = data.tipe.includes('Manual') ? 'BUKTI SETOR TUNAI' : 'BUKTI POTONG GAJI';
+    let labelMetode = data.tipe.includes('Manual') ? 'TUNAI (CASH)' : 'POTONG GAJI (PAYROLL)';
+
+    // 3. Template HTML
+    const win = window.open('', '', 'height=600,width=800');
+    
+    const htmlContent = `
+    <html>
+    <head>
+        <title>Slip Kasbon - ${data.nama}</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
+            body { font-family: 'Roboto', sans-serif; padding: 20px; color: #333; -webkit-print-color-adjust: exact; }
+            
+            .container { 
+                border: 1px solid #999; 
+                padding: 30px; 
+                max-width: 180mm; /* A5 Landscape Width Approx */
+                margin: 0 auto;
+                background: #fff;
+            }
+            
+            /* Header */
+            .header { display: flex; align-items: center; border-bottom: 2px double #333; padding-bottom: 15px; margin-bottom: 20px; }
+            .header h2 { margin: 0; font-size: 18px; text-transform: uppercase; color: #d32f2f; }
+            .header p { margin: 0; font-size: 10px; color: #555; }
+
+            /* Judul Slip */
+            .judul-slip { 
+                text-align: center; font-size: 16px; font-weight: bold; 
+                background: ${warna}; color: white; padding: 8px; 
+                border-radius: 4px; margin-bottom: 20px; letter-spacing: 1px;
+            }
+
+            /* Info Table */
+            .info-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+            .info-table td { padding: 6px; font-size: 12px; border-bottom: 1px dashed #eee; }
+            .label { font-weight: bold; width: 140px; }
+            .val { font-weight: 500; }
+            .nominal-big { font-size: 18px; font-weight: bold; color: ${warna}; }
+
+            /* Footer TTD */
+            .footer { display: flex; justify-content: space-between; margin-top: 40px; text-align: center; }
+            .ttd-box { width: 30%; }
+            .ttd-line { border-bottom: 1px solid #000; margin-top: 60px; font-weight: bold; font-size: 11px; }
+
+            .watermark { 
+                position: absolute; top: 30%; left: 30%; 
+                font-size: 60px; color: rgba(0,0,0,0.05); 
+                transform: rotate(-30deg); font-weight: bold; z-index: 0; pointer-events: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="watermark">LUNAS / CICIL</div>
+            
+            <div class="header">
+                ${htmlLogo}
+                <div>
+                    <h2>${namaPT}</h2>
+                    <p>${alamatPT}</p>
+                    <p>Telp: ${noPT}</p>
+                </div>
+            </div>
+
+            <div class="judul-slip">${judul} - KASBON KARYAWAN</div>
+
+            <table class="info-table">
+                <tr>
+                    <td class="label">No. Referensi</td>
+                    <td class="val">: ${'PAY-' + Date.now().toString().slice(-6)}</td>
+                </tr>
+                <tr>
+                    <td class="label">Tanggal Bayar</td>
+                    <td class="val">: ${data.tanggal}</td>
+                </tr>
+                <tr>
+                    <td class="label">Nama Karyawan</td>
+                    <td class="val">: <b>${data.nama}</b></td>
+                </tr>
+                <tr>
+                    <td class="label">Metode Bayar</td>
+                    <td class="val">: ${labelMetode}</td>
+                </tr>
+                <tr>
+                    <td class="label">Keterangan</td>
+                    <td class="val">: ${data.ket}</td>
+                </tr>
+                <tr>
+                    <td class="label" style="padding-top:15px">NOMINAL DIBAYAR</td>
+                    <td class="val" style="padding-top:15px">
+                        <span class="nominal-big">${rupiah(data.nominal)}</span>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="label">Sisa Hutang (Saat Ini)</td>
+                    <td class="val">: <span style="color:red; font-weight:bold;">${rupiah(data.sisa)}</span></td>
+                </tr>
+            </table>
+
+            <div class="footer">
+                <div class="ttd-box">
+                    <small>Disetujui Oleh,</small>
+                    <div class="ttd-line">( Admin / HRD )</div>
+                </div>
+                <div class="ttd-box">
+                    <small>Penyetor / Karyawan,</small>
+                    <div class="ttd-line">( ${data.nama} )</div>
+                </div>
+            </div>
+
+            <div style="margin-top:20px; font-size:9px; color:#999; text-align:center;">
+                Dicetak pada: ${new Date().toLocaleString('id-ID')} | System ID: ${data.idKasbon}
+            </div>
+        </div>
+        <script>setTimeout(() => { window.print(); }, 800);
         ` + '</sc' + 'ript>' + `
     </body>
     </html>
